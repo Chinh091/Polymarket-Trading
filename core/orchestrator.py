@@ -11,18 +11,33 @@ from datetime import datetime
 from queue import Queue, Empty
 from threading import Thread
 
-from core.database import init_database, save_signal
+import json
+
+# Auto-select Supabase when SUPABASE_URL is configured, else fall back to SQLite
+if os.getenv("SUPABASE_URL"):
+    from core.supabase_db import (
+        init_database, save_signal, save_trade_journal,
+        save_markets, save_price_snapshot, save_portfolio_snapshot,
+        get_open_trades, get_trade_history, get_strategy_params
+    )
+    logger_db = "supabase"
+else:
+    from core.database import init_database, save_signal, save_trade_journal
+    logger_db = "sqlite"
+
 from core.logger import setup_logger
 from core.portfolio import VirtualPortfolio
 from agents.agents import (
     MarketScannerAgent, ArbitrageAgent,
-    NewsAnalystAgent, RiskManagerAgent, PositionSizerAgent
+    NewsAnalystAgent, RiskManagerAgent, PositionSizerAgent,
+    OTMOpportunityAgent, BayesPriorAgent
 )
 from data.polymarket_fetcher import PolymarketFetcher
 from data.binance_fetcher import BinanceFetcher
 from data.news_fetcher import NewsFetcher
 
 logger = setup_logger("Orchestrator")
+logger.info(f"Database backend: {logger_db}")
 
 
 class MasterOrchestrator:
@@ -58,6 +73,8 @@ class MasterOrchestrator:
         self.news_agent     = NewsAnalystAgent(news_fetcher=self.news)
         self.risk_manager   = RiskManagerAgent(portfolio=self.portfolio)
         self.position_sizer = PositionSizerAgent(portfolio=self.portfolio)
+        self.otm_agent      = OTMOpportunityAgent(arbitrage_agent=self.arbitrage)
+        self.bayes_agent    = BayesPriorAgent(arbitrage_agent=self.arbitrage)
 
         # Recent signals buffer for consensus check
         self.recent_signals = []  # list of signal dicts from last 5 minutes
@@ -96,6 +113,8 @@ class MasterOrchestrator:
             Thread(target=self._run_risk_monitor,    daemon=True, name="RiskMonitor"),
             Thread(target=self._run_signal_processor,daemon=True, name="SignalProcessor"),
             Thread(target=self._run_binance_prices,  daemon=True, name="BinancePrices"),
+            Thread(target=self._run_otm_agent,       daemon=True, name="OTMOpportunity"),
+            Thread(target=self._run_bayes_agent,     daemon=True, name="BayesPrior"),
         ]
         for t in threads:
             t.start()
@@ -111,6 +130,12 @@ class MasterOrchestrator:
             logger.info("Stopping bot...")
             self.running = False
             self.portfolio.print_summary()
+            # Auto-generate end-of-day report on exit
+            try:
+                from reports.generate_report import save_report
+                save_report()
+            except Exception as e:
+                logger.error(f"Could not generate report: {e}")
 
     # ------------------------------------------------------------------
     # Agent Threads
@@ -158,6 +183,96 @@ class MasterOrchestrator:
             except Exception as e:
                 logger.error(f"RiskMonitor error: {e}")
             time.sleep(30)
+
+    def _call_opus_gate(self, question: str, direction: str, size: float,
+                        price: float, avg_edge: float, avg_confidence: float,
+                        consensus: list) -> dict:
+        """
+        Opus 4.6 is the mandatory final decision maker.
+        Only APPROVE passes — REJECT or any error drops the trade.
+        Falls back to APPROVE only if no API key is configured.
+        """
+        api_key = os.getenv("ANTHROPIC_API_KEY", "")
+        if not api_key:
+            logger.warning("No ANTHROPIC_API_KEY — Opus gate bypassed, auto-approving")
+            return {"verdict": "APPROVE", "reasoning": "No API key configured."}
+
+        agent_lines = "\n".join([
+            f"  • {s.get('agent')}: {s.get('reason', '')} "
+            f"(edge={s.get('edge_pct', 0):.1f}%, conf={s.get('confidence', 0):.0%})"
+            for s in consensus
+        ])
+
+        prompt = f"""You are the automated risk gate for a Polymarket paper trading bot.
+Your decision is final and binary — no hedging allowed.
+
+PROPOSED TRADE
+  Market    : {question}
+  Direction : BUY {direction} contracts
+  Size      : ${size:.2f} USDC (paper money)
+  Entry     : {price:.3f} ({price * 100:.1f}% implied probability)
+  Edge est. : {avg_edge:.1f}% after 1.56% taker fee
+  Confidence: {avg_confidence:.0%}
+
+AGENT SIGNALS (≥2 agreed to trigger):
+{agent_lines}
+
+APPROVE if: edge is credibly positive, agent reasoning is internally consistent,
+            direction matches the stated logic, size is proportionate to confidence.
+
+REJECT if:  edge looks fabricated or trivially small, reasoning contradicts itself,
+            direction and logic don't match, or signal is obvious noise.
+
+Reply with ONLY valid JSON — no markdown, no explanation outside the JSON:
+{{"verdict": "APPROVE", "reasoning": "1-2 sentences max"}}
+
+Verdict must be exactly APPROVE or REJECT. UNCERTAIN is not a valid answer."""
+
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=api_key)
+            msg = client.messages.create(
+                model="claude-opus-4-6",
+                max_tokens=120,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            text = msg.content[0].text.strip()
+            result = json.loads(text)
+            # Enforce binary — anything other than APPROVE is a REJECT
+            if result.get("verdict") not in ("APPROVE", "REJECT"):
+                result["verdict"] = "REJECT"
+                result["reasoning"] = f"Unexpected verdict normalised to REJECT: {text[:60]}"
+            return result
+        except json.JSONDecodeError as e:
+            logger.error(f"Opus gate returned non-JSON: {e} — rejecting to be safe")
+            return {"verdict": "REJECT", "reasoning": f"Parse error: {e}"}
+        except Exception as e:
+            logger.error(f"Opus gate API error: {e} — rejecting to be safe")
+            return {"verdict": "REJECT", "reasoning": f"API error: {e}"}
+
+    def _run_bayes_agent(self):
+        """Runs BayesPriorAgent every 2 minutes."""
+        while self.running:
+            try:
+                logger.info("[BayesPrior] Running Bayes prior mapping scan...")
+                signal = self.bayes_agent.get_signal()
+                if signal["signal_type"] == "TRADE":
+                    self.signal_queue.put(signal)
+            except Exception as e:
+                logger.error(f"BayesAgent error: {e}")
+            time.sleep(120)
+
+    def _run_otm_agent(self):
+        """Runs OTMOpportunityAgent every 90 seconds."""
+        while self.running:
+            try:
+                logger.info("[OTMOpportunity] Scanning for underpriced OTM contracts...")
+                signal = self.otm_agent.get_signal()
+                if signal["signal_type"] == "TRADE":
+                    self.signal_queue.put(signal)
+            except Exception as e:
+                logger.error(f"OTMAgent error: {e}")
+            time.sleep(90)
 
     def _run_binance_prices(self):
         """Fetches Binance prices every 5 seconds via REST (WebSocket alternative)."""
@@ -250,13 +365,24 @@ class MasterOrchestrator:
         return list(agreeing.values())
 
     def _execute_trade(self, signal: dict, consensus: list):
-        """Validate and execute a paper trade."""
+        """Validate and execute a paper trade. Journals every decision."""
         condition_id = signal.get("condition_id")
         direction    = signal.get("direction")
 
         # Average edge and confidence across agreeing agents
         avg_edge       = sum(s.get("edge_pct", 0) for s in consensus) / len(consensus)
         avg_confidence = sum(s.get("confidence", 0) for s in consensus) / len(consensus)
+
+        # Shared agent metadata for journaling
+        agent_sources  = "+".join(s["agent"] for s in consensus)
+        agent_signals_json = json.dumps([{
+            "agent":      s.get("agent"),
+            "reason":     s.get("reason"),
+            "edge_pct":   s.get("edge_pct"),
+            "confidence": s.get("confidence"),
+            "direction":  s.get("direction"),
+            "data":       s.get("data", {}),
+        } for s in consensus])
 
         # Size the position
         proposed_size = self.position_sizer.calculate_size(
@@ -270,24 +396,61 @@ class MasterOrchestrator:
             return
 
         # Risk check
-        agent_sources = "+".join(s["agent"] for s in consensus)
         validation = self.risk_manager.validate_trade(signal, proposed_size)
-
         if not validation["approved"]:
             logger.info(f"Trade rejected by RiskManager: {validation['reason']}")
+            save_trade_journal(
+                condition_id=condition_id, question=signal.get("reason", "")[:100],
+                direction=direction, proposed_size=proposed_size, entry_price=0,
+                agent_sources=agent_sources, agent_signals=agent_signals_json,
+                opus_verdict="N/A", opus_reasoning=f"RiskManager: {validation['reason']}",
+                outcome="rejected_risk", avg_edge=avg_edge, avg_confidence=avg_confidence
+            )
             return
 
         final_size = validation["adjusted_size"]
 
-        # Get market details for logging
+        # Get market details
         from core.database import get_active_markets
-        markets = {m.get("condition_id", m.get("id","")): m
-                   for m in get_active_markets(limit=200)}
-        market  = markets.get(condition_id, {})
+        markets  = {m.get("condition_id", m.get("id","")): m
+                    for m in get_active_markets(limit=200)}
+        market   = markets.get(condition_id, {})
         question = market.get("question", condition_id[:50])
-        price   = market.get("last_price_yes", 0.5) or 0.5
+        price    = market.get("last_price_yes", 0.5) or 0.5
         if direction == "NO":
             price = 1 - price
+        market_volume = market.get("volume", 0) or 0
+
+        # ── Opus 4.6 Automated Gate ──────────────────────────────────────
+        logger.info(
+            f"Asking Opus 4.6 to decide: {direction} ${final_size:.2f} "
+            f"on {question[:50]}"
+        )
+        gate = self._call_opus_gate(
+            question=question, direction=direction, size=final_size,
+            price=price, avg_edge=avg_edge, avg_confidence=avg_confidence,
+            consensus=consensus
+        )
+
+        if gate["verdict"] != "APPROVE":
+            logger.info(
+                f"Opus 4.6 REJECTED: {gate.get('reasoning','')[:120]} — trade dropped"
+            )
+            save_trade_journal(
+                condition_id=condition_id, question=question, direction=direction,
+                proposed_size=final_size, entry_price=price,
+                agent_sources=agent_sources, agent_signals=agent_signals_json,
+                opus_verdict=gate["verdict"], opus_reasoning=gate.get("reasoning", ""),
+                outcome="rejected_opus", avg_edge=avg_edge, avg_confidence=avg_confidence,
+                market_volume=market_volume
+            )
+            self.recent_signals = [
+                s for s in self.recent_signals
+                if s.get("condition_id") != condition_id
+            ]
+            return
+
+        logger.info(f"Opus 4.6 APPROVED: {gate.get('reasoning','')[:100]}")
 
         # Execute the paper trade
         trade = self.portfolio.open_position(
@@ -304,11 +467,18 @@ class MasterOrchestrator:
             logger.error(f"Trade failed: {trade['error']}")
         else:
             logger.info(
-                f"TRADE EXECUTED by [{agent_sources}]: "
-                f"{direction} ${final_size:.2f} @ {price:.3f} "
-                f"edge={avg_edge:.1f}%"
+                f"TRADE EXECUTED by [{agent_sources}] + Opus 4.6: "
+                f"{direction} ${final_size:.2f} @ {price:.3f} edge={avg_edge:.1f}%"
             )
-            # Clear signals for this market to avoid duplicate trades
+            # Journal the successful execution
+            save_trade_journal(
+                condition_id=condition_id, question=question, direction=direction,
+                proposed_size=final_size, entry_price=price,
+                agent_sources=agent_sources, agent_signals=agent_signals_json,
+                opus_verdict="APPROVE", opus_reasoning=gate.get("reasoning", ""),
+                outcome="executed", avg_edge=avg_edge, avg_confidence=avg_confidence,
+                market_volume=market_volume
+            )
             self.recent_signals = [
                 s for s in self.recent_signals
                 if s.get("condition_id") != condition_id

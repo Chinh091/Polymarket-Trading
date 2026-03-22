@@ -135,6 +135,28 @@ def init_database():
         )
     """)
 
+    # Trade journal — full context for every decision (approved AND rejected)
+    # This is the primary source for end-of-day reports and future improvement
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS trade_journal (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            condition_id    TEXT NOT NULL,
+            question        TEXT,
+            direction       TEXT,
+            proposed_size   REAL,
+            entry_price     REAL,
+            agent_sources   TEXT,
+            agent_signals   TEXT,   -- JSON: full signal from each agent
+            opus_verdict    TEXT,   -- APPROVE | REJECT
+            opus_reasoning  TEXT,
+            outcome         TEXT,   -- 'executed' | 'rejected_opus' | 'rejected_risk' | 'zero_size'
+            avg_edge        REAL,
+            avg_confidence  REAL,
+            market_volume   REAL,
+            logged_at       TEXT NOT NULL
+        )
+    """)
+
     conn.commit()
     conn.close()
     logger.info(f"Database initialised at {DB_PATH}")
@@ -278,6 +300,47 @@ def get_trade_history(limit: int = 100) -> list:
         SELECT * FROM paper_trades
         ORDER BY opened_at DESC LIMIT ?
     """, (limit,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def save_trade_journal(condition_id: str, question: str, direction: str,
+                       proposed_size: float, entry_price: float,
+                       agent_sources: str, agent_signals: str,
+                       opus_verdict: str, opus_reasoning: str,
+                       outcome: str, avg_edge: float, avg_confidence: float,
+                       market_volume: float = 0):
+    conn = get_connection()
+    conn.execute("""
+        INSERT INTO trade_journal
+        (condition_id, question, direction, proposed_size, entry_price,
+         agent_sources, agent_signals, opus_verdict, opus_reasoning,
+         outcome, avg_edge, avg_confidence, market_volume, logged_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """, (
+        condition_id, question, direction, proposed_size, entry_price,
+        agent_sources, agent_signals, opus_verdict, opus_reasoning,
+        outcome, avg_edge, avg_confidence, market_volume,
+        datetime.utcnow().isoformat()
+    ))
+    conn.commit()
+    conn.close()
+
+
+def get_trade_journal(date_str: str = None, limit: int = 500) -> list:
+    """Fetch journal entries. date_str = 'YYYY-MM-DD' to filter by day."""
+    conn = get_connection()
+    if date_str:
+        rows = conn.execute("""
+            SELECT * FROM trade_journal
+            WHERE logged_at LIKE ?
+            ORDER BY logged_at DESC LIMIT ?
+        """, (f"{date_str}%", limit)).fetchall()
+    else:
+        rows = conn.execute("""
+            SELECT * FROM trade_journal
+            ORDER BY logged_at DESC LIMIT ?
+        """, (limit,)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 

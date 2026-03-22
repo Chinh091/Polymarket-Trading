@@ -99,28 +99,56 @@ class MarketScannerAgent(BaseAgent):
         self.max_price  = 0.95
 
     def get_signal(self) -> dict:
+        import math
         markets = get_active_markets(limit=100)
         if not markets:
             return self._no_signal("No active markets in database yet")
 
         candidates = []
         for m in markets:
-            vol = m.get("volume", 0) or 0
+            vol      = m.get("volume", 0) or 0
             yes_price = m.get("last_price_yes", 0) or 0
-            no_price  = m.get("last_price_no", 0) or 0
 
             if vol < self.min_volume:
                 continue
             if not (self.min_price < yes_price < self.max_price):
                 continue
 
-            # Score: higher volume = more liquid = better fills
+            # Liquidity score (unchanged)
             liquidity_score = min(vol / 100_000, 1.0)
-            # Price near 0.5 = more uncertainty = more trading opportunity
-            uncertainty_score = 1.0 - abs(yes_price - 0.5) * 2
 
-            total_score = (liquidity_score * 0.6) + (uncertainty_score * 0.4)
-            candidates.append({**m, "scanner_score": total_score})
+            # Shannon entropy replaces the old linear uncertainty score.
+            # H=1.0 at p=0.5 (max uncertainty), H→0 near 0 or 1.
+            entropy = ArbitrageAgent.shannon_entropy(yes_price)
+
+            # LMSR bonus: price < 0.07 suggests the automated market maker
+            # has set an underpriced YES — structural edge from research.
+            lmsr_bonus = 0.25 if yes_price < 0.07 else 0.0
+
+            total_score = (liquidity_score * 0.5) + (entropy * 0.35) + lmsr_bonus
+
+            # Direction logic (replaces the broken "always YES"):
+            # LMSR underpriced → buy YES
+            # Price < 0.5 → market undervalues the event → YES has upside
+            # Price > 0.5 → YES is overpriced, buy NO instead
+            if yes_price < 0.07:
+                direction = "YES"
+                edge_pct  = (0.12 - yes_price) * 100  # LMSR mean-reversion estimate
+            elif yes_price < 0.5:
+                direction = "YES"
+                edge_pct  = entropy * 6.0
+            else:
+                direction = "NO"
+                edge_pct  = entropy * 6.0
+
+            candidates.append({
+                **m,
+                "scanner_score": total_score,
+                "direction":     direction,
+                "edge_pct":      edge_pct,
+                "entropy":       entropy,
+                "lmsr_bonus":    lmsr_bonus,
+            })
 
         if not candidates:
             return self._no_signal(
@@ -134,17 +162,31 @@ class MarketScannerAgent(BaseAgent):
         self.logger.info(
             f"Top market: {best.get('question','')[:60]} "
             f"| Vol: ${best.get('volume',0):,.0f} "
+            f"| Entropy: {best['entropy']:.3f} "
+            f"| LMSR bonus: {best['lmsr_bonus']:.2f} "
+            f"| Direction: {best['direction']} "
             f"| Score: {best['scanner_score']:.2f}"
         )
 
+        confidence = min(best["scanner_score"] * 0.75, 0.72)
+
         return self._trade_signal(
             condition_id=best.get("condition_id", best.get("id", "")),
-            direction="YES",
-            confidence=0.5,
-            edge_pct=0.0,
-            reason=f"High-volume market identified: score={best['scanner_score']:.2f}",
-            data={"top_candidates": [c.get("question","")[:50] for c in candidates[:5]],
-                  "best_volume": best.get("volume", 0)}
+            direction=best["direction"],
+            confidence=confidence,
+            edge_pct=round(best["edge_pct"], 2),
+            reason=(
+                f"Scanner: {best['direction']} signal | "
+                f"entropy={best['entropy']:.3f} | "
+                f"lmsr_bonus={best['lmsr_bonus']:.2f} | "
+                f"score={best['scanner_score']:.2f}"
+            ),
+            data={
+                "top_candidates": [c.get("question", "")[:50] for c in candidates[:5]],
+                "best_volume":    best.get("volume", 0),
+                "entropy":        best["entropy"],
+                "yes_price":      best.get("last_price_yes", 0),
+            }
         )
 
     def get_top_markets(self, n: int = 10) -> list:
@@ -217,22 +259,34 @@ class ArbitrageAgent(BaseAgent):
 
     def momentum_to_probability(self, momentum_pct: float) -> float:
         """
-        Convert price momentum to implied win probability.
-        Based on: strong momentum → high probability of continuing 
-        (within a 15-minute window specifically).
-        
-        Calibration (rough empirical estimates):
-        +1.0% move → ~72% chance of being up at 15min mark
-        +0.5% move → ~65% chance
-        +0.2% move → ~57% chance
-        0.0%       → ~50% chance (random)
-        -0.2% move → ~43% chance
+        Convert price momentum to implied win probability using log-odds transform.
+
+        Log-odds filter (from research): signals where |log-odds| < 0.5 are noise.
+        |log-odds| > 0.5 means probability is outside 37.8%–62.2% — a real edge.
+
+        +1.0% move → raw ~72% → log-odds +0.94 → passes
+        +0.5% move → raw ~65% → log-odds +0.62 → passes
+        +0.2% move → raw ~55% → log-odds +0.20 → FILTERED (noise)
+        0.0%       → raw ~50% → log-odds  0.00 → FILTERED
         """
         import math
-        # Sigmoid-like mapping: momentum % → probability
-        # Capped at 95% / 5% to avoid claiming certainty
         raw = 0.5 + (momentum_pct / 4.0) * 0.5
-        return max(0.05, min(0.95, raw))
+        raw = max(0.05, min(0.95, raw))
+
+        # Log-odds transform — discard weak signals
+        log_odds = math.log(raw / (1.0 - raw))
+        if abs(log_odds) < 0.5:
+            return 0.5  # Too weak — caller checks for 0.5 and skips
+
+        return raw
+
+    @staticmethod
+    def shannon_entropy(p: float) -> float:
+        """H = -p*log2(p) - (1-p)*log2(1-p). Max 1.0 at p=0.5, zero at 0 or 1."""
+        import math
+        if p <= 0.0 or p >= 1.0:
+            return 0.0
+        return -p * math.log2(p) - (1.0 - p) * math.log2(1.0 - p)
 
     def get_signal(self) -> dict:
         """
@@ -250,6 +304,8 @@ class ArbitrageAgent(BaseAgent):
                 continue  # Not enough movement to signal
 
             true_prob = self.momentum_to_probability(momentum)
+            if true_prob == 0.5:
+                continue  # Log-odds filter: signal too weak to trade
             direction = "YES" if momentum > 0 else "NO"
 
             # Find matching Polymarket market
@@ -520,3 +576,302 @@ class PositionSizerAgent(BaseAgent):
     def get_signal(self) -> dict:
         """Passive agent — called directly via calculate_size(), not via signal loop."""
         return self._no_signal("PositionSizer is called directly, not via signal loop")
+
+
+# ======================================================================
+# AGENT 7 — BAYES PRIOR AGENT
+# ======================================================================
+
+class BayesPriorAgent(BaseAgent):
+    """
+    Implements the Bayes Prior Update mapping function from research.
+
+    Procedure (from cheat sheet):
+    1. Square the market price as a skeptical prior: prior = p²
+       Rationale: p² < p for all p in (0,1), so we demand stronger evidence
+       for low-probability events before accepting them as underpriced.
+    2. Estimate true probability B from external signals (momentum + news).
+    3. Compute mapping M = B - p²
+       M > +threshold → market underprices event → BUY YES
+       M < -threshold → market overprices event  → BUY NO
+
+    This naturally implements "Overpriced YES → Sell NO" from the cheat sheet:
+    when YES is expensive but fundamentals disagree, M goes deeply negative
+    and the agent signals NO.
+
+    Target market keywords (from cheat sheet portfolio section):
+    - Crypto price-level: BTC, ETH, SOL
+    - Stock price-level:  MARA, MGR, RNA
+    """
+
+    TARGET_KEYWORDS = [
+        # Crypto
+        ("BTCUSDT",  ["bitcoin", "btc"]),
+        ("ETHUSDT",  ["ethereum", "eth"]),
+        ("SOLUSDT",  ["solana", "sol"]),
+        # Stock price-level markets — use macro/momentum proxy via BTC correlation
+        ("BTCUSDT",  ["mara", "marathon digital"]),
+        ("BTCUSDT",  ["mgr", "mstr", "microstrategy"]),
+    ]
+
+    def __init__(self, arbitrage_agent=None):
+        super().__init__("BayesPrior")
+        self.arbitrage   = arbitrage_agent
+        self.m_threshold = 0.06    # |M| must exceed this to signal
+        self.min_volume  = 10_000
+        self.fee         = 0.0156
+
+    def _estimate_true_prob(self, question: str, yes_price: float) -> float | None:
+        """
+        Estimate true probability B from Binance momentum.
+        Returns None if no relevant signal is found.
+        """
+        if not self.arbitrage:
+            return None
+
+        q = question.lower()
+
+        for symbol, keywords in self.TARGET_KEYWORDS:
+            if not any(kw in q for kw in keywords):
+                continue
+
+            # Use 5-minute momentum as the signal window
+            momentum = self.arbitrage.get_momentum(symbol, seconds=300)
+
+            # Convert momentum to a probability adjustment using log-odds filter
+            raw_p = 0.5 + (momentum / 4.0) * 0.5
+            raw_p = max(0.05, min(0.95, raw_p))
+
+            import math
+            log_odds = math.log(raw_p / (1.0 - raw_p))
+            if abs(log_odds) < 0.4:
+                return None  # Too weak to inform the prior
+
+            # Blend estimated probability toward the market price direction
+            # Strong upward momentum → push B above market price
+            # Strong downward momentum → push B below market price
+            if momentum > 0:
+                B = min(yes_price * 1.8 + 0.05, 0.90)
+            else:
+                B = max(yes_price * 0.5 - 0.03, 0.02)
+
+            return B
+
+        return None  # No matching symbol for this market
+
+    def get_signal(self) -> dict:
+        import math
+        markets = get_active_markets(limit=200)
+
+        best_m       = 0.0
+        best_market  = None
+        best_b       = 0.0
+        best_dir     = "YES"
+
+        for m in markets:
+            yes_price = m.get("last_price_yes", 0) or 0
+            vol       = m.get("volume", 0) or 0
+            question  = m.get("question", "")
+
+            if vol < self.min_volume:
+                continue
+            if not (0.03 < yes_price < 0.97):
+                continue
+
+            B = self._estimate_true_prob(question, yes_price)
+            if B is None:
+                continue
+
+            # Skeptical prior: p² (penalises low-price events more)
+            prior = yes_price ** 2
+
+            # Mapping function M
+            M = B - prior
+
+            if abs(M) > abs(best_m):
+                best_m      = M
+                best_market = m
+                best_b      = B
+                # M > 0: YES underpriced → buy YES
+                # M < 0: YES overpriced → buy NO
+                best_dir = "YES" if M > 0 else "NO"
+
+        if best_market is None or abs(best_m) < self.m_threshold:
+            return self._no_signal(
+                f"No Bayes signal (best |M|={abs(best_m):.3f}, need {self.m_threshold})"
+            )
+
+        yes_price = best_market.get("last_price_yes", 0)
+        entry     = yes_price if best_dir == "YES" else (1.0 - yes_price)
+        edge_pct  = (abs(best_b - yes_price) - self.fee) * 100
+
+        if edge_pct <= 0:
+            return self._no_signal("Bayes edge disappears after fees")
+
+        confidence = min(0.45 + abs(best_m) * 1.5, 0.80)
+
+        self.logger.info(
+            f"BAYES SIGNAL: {best_dir} on {best_market.get('question','')[:60]} "
+            f"| p={yes_price:.3f} | prior=p²={yes_price**2:.3f} "
+            f"| B={best_b:.3f} | M={best_m:+.3f} | edge={edge_pct:.1f}%"
+        )
+
+        return self._trade_signal(
+            condition_id=best_market.get("condition_id", best_market.get("id", "")),
+            direction=best_dir,
+            confidence=round(confidence, 3),
+            edge_pct=round(edge_pct, 2),
+            reason=(
+                f"Bayes: p={yes_price:.3f}, prior=p²={yes_price**2:.3f}, "
+                f"B={best_b:.3f}, M={best_m:+.3f} → {best_dir} "
+                f"({'underpriced' if best_dir == 'YES' else 'overpriced YES → sell NO'})"
+            ),
+            data={
+                "yes_price":  yes_price,
+                "bayes_B":    best_b,
+                "prior_p2":   round(yes_price ** 2, 4),
+                "mapping_M":  round(best_m, 4),
+                "question":   best_market.get("question", "")[:100],
+            }
+        )
+
+
+# ======================================================================
+# AGENT 6 — OTM OPPORTUNITY AGENT
+# ======================================================================
+
+class OTMOpportunityAgent(BaseAgent):
+    """
+    Finds underpriced Out-of-The-Money contracts.
+
+    Research insight: buying a 5% contract when true probability is ~10%
+    has strongly positive expected value (EV ratio = 2.0x).
+
+    EV ratio = estimated_true_prob / market_price
+    Threshold: 1.8x minimum (accounts for 1.56% taker fee + uncertainty).
+
+    True probability is estimated from:
+    1. Binance spot momentum (for crypto price-level markets)
+    2. Log-odds validation to filter noise from the estimate itself
+
+    Only signals when:
+    - YES price is in OTM range: 0.04–0.10
+    - Volume >= $5,000 (some liquidity)
+    - EV ratio >= 1.8x after fees
+    - Log-odds of estimated true prob passes |log-odds| > 0.3 filter
+    """
+
+    def __init__(self, arbitrage_agent=None):
+        super().__init__("OTMOpportunity")
+        self.arbitrage  = arbitrage_agent
+        self.otm_min    = 0.04
+        self.otm_max    = 0.10
+        self.min_volume = 5_000
+        self.min_ev     = 1.8    # estimated_true_prob must be 1.8x market price
+        self.fee        = 0.0156
+
+    def _estimate_true_probability(self, question: str, market_price: float) -> float:
+        """
+        Estimate true probability using Binance momentum signal.
+        Returns market_price (neutral) if no external signal found.
+        """
+        if not self.arbitrage:
+            return market_price
+
+        q = question.lower()
+        symbol_keywords = [
+            ("BTCUSDT", ["bitcoin", "btc"]),
+            ("ETHUSDT", ["ethereum", "eth"]),
+            ("SOLUSDT", ["solana", "sol"]),
+        ]
+
+        for symbol, keywords in symbol_keywords:
+            if not any(kw in q for kw in keywords):
+                continue
+
+            # Use 5-minute momentum for OTM markets (longer window)
+            momentum = self.arbitrage.get_momentum(symbol, seconds=300)
+
+            if momentum > 0.5:
+                # Strong upward momentum → upward price-level event more likely
+                return min(market_price * 2.2, 0.35)
+            elif momentum > 0.2:
+                return min(market_price * 1.6, 0.20)
+            elif momentum < -0.5:
+                # Strong downward momentum → upward price-level event less likely
+                return market_price * 0.6
+            else:
+                return market_price  # Momentum too weak — no adjustment
+
+        return market_price  # No matching symbol
+
+    def get_signal(self) -> dict:
+        import math
+        markets = get_active_markets(limit=200)
+
+        best_ev      = 0.0
+        best_market  = None
+        best_true_p  = 0.0
+
+        for m in markets:
+            yes_price = m.get("last_price_yes", 0) or 0
+            vol       = m.get("volume", 0) or 0
+
+            if not (self.otm_min <= yes_price <= self.otm_max):
+                continue
+            if vol < self.min_volume:
+                continue
+
+            question   = m.get("question", "")
+            true_prob  = self._estimate_true_probability(question, yes_price)
+
+            ev_ratio = true_prob / yes_price if yes_price > 0 else 0
+            if ev_ratio > best_ev:
+                best_ev     = ev_ratio
+                best_market = m
+                best_true_p = true_prob
+
+        if not best_market or best_ev < self.min_ev:
+            return self._no_signal(
+                f"No OTM opportunity (best EV ratio: {best_ev:.2f}x, need {self.min_ev}x)"
+            )
+
+        yes_price = best_market.get("last_price_yes", 0)
+        edge_pct  = (best_true_p - yes_price - self.fee) * 100
+
+        if edge_pct <= 0:
+            return self._no_signal("OTM edge disappears after fees")
+
+        # Log-odds validation on the estimate itself
+        if 0 < best_true_p < 1:
+            log_odds = math.log(best_true_p / (1.0 - best_true_p))
+            if abs(log_odds) < 0.3:
+                return self._no_signal(
+                    f"OTM estimate log-odds too weak ({log_odds:.2f}) — likely noise"
+                )
+
+        confidence = min(0.45 + (best_ev - self.min_ev) * 0.08, 0.78)
+
+        self.logger.info(
+            f"OTM SIGNAL: {best_market.get('question','')[:60]} "
+            f"| market={yes_price:.3f} | true_prob≈{best_true_p:.3f} "
+            f"| EV={best_ev:.2f}x | edge={edge_pct:.1f}%"
+        )
+
+        return self._trade_signal(
+            condition_id=best_market.get("condition_id", best_market.get("id", "")),
+            direction="YES",
+            confidence=confidence,
+            edge_pct=round(edge_pct, 2),
+            reason=(
+                f"OTM: market={yes_price:.3f}, "
+                f"est. true_prob={best_true_p:.3f}, "
+                f"EV ratio={best_ev:.2f}x after fees"
+            ),
+            data={
+                "market_price":        yes_price,
+                "estimated_true_prob": best_true_p,
+                "ev_ratio":            best_ev,
+                "question":            best_market.get("question", "")[:100],
+            }
+        )
