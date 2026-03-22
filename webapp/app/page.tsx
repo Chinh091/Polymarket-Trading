@@ -10,6 +10,10 @@ import ParamsTable from "@/components/ParamsTable";
 export const revalidate = 30;
 
 async function getData() {
+  if (!supabase) {
+    return { trades: [], portfolio: [], journal: [], params: [] };
+  }
+
   const [tradesRes, portfolioRes, journalRes, paramsRes] = await Promise.all([
     supabase
       .from("paper_trades")
@@ -41,6 +45,7 @@ async function getData() {
 }
 
 export default async function Dashboard() {
+  const configured = !!supabase;
   const { trades, portfolio, journal, params } = await getData();
 
   const closed    = trades.filter((t) => t.status === "closed");
@@ -57,6 +62,15 @@ export default async function Dashboard() {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 p-6">
+      {/* Env var warning */}
+      {!configured && (
+        <div className="mb-6 rounded-lg border border-amber-700 bg-amber-900/20 px-4 py-3 text-sm text-amber-300">
+          <strong>Setup required:</strong> Add{" "}
+          <code className="font-mono text-amber-200">NEXT_PUBLIC_SUPABASE_URL</code> and{" "}
+          <code className="font-mono text-amber-200">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>{" "}
+          in your Vercel project settings, then redeploy.
+        </div>
+      )}
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-2xl font-medium tracking-[-0.03em]">
