@@ -1,0 +1,23 @@
+# Environment — NEVER commit these
+.env
+.env.local
+*.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+logs/
+*.db
+*.sqlite
+
+# Bot data
+data/*.json
+
+# Reports output
+reports/report_*.md
+research/reports/
+
+# Node / webapp
+webapp/node_modules/
+webapp/.next/

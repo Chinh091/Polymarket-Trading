@@ -9,6 +9,10 @@ import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
+# Ensure UTF-8 output on Windows
+if sys.stdout.encoding != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8")
+
 # Load .env file
 load_dotenv()
 
