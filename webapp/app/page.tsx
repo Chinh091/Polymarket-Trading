@@ -72,13 +72,21 @@ export default async function Dashboard() {
         </div>
       )}
       {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-2xl font-medium tracking-[-0.03em]">
-          Polymarket Paper Trading
-        </h1>
-        <p className="text-sm text-zinc-500 mt-1">
-          Live dashboard · auto-refreshes every 30 s
-        </p>
+      <div className="mb-8 flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-medium tracking-[-0.03em]">
+            Polymarket Paper Trading
+          </h1>
+          <p className="text-sm text-zinc-500 mt-1">
+            Live dashboard · auto-refreshes every 30 s
+          </p>
+        </div>
+        <a
+          href="/reports"
+          className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm font-mono text-zinc-300 hover:border-zinc-500 transition-colors"
+        >
+          Daily Reports →
+        </a>
       </div>
 
       {/* KPI row */}
