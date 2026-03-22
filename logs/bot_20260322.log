@@ -7,3 +7,4 @@
 2026-03-22 05:53:03 | INFO     | MarketScanner             | Top market: Will BTC be higher in 15 minutes? (flow test) | Vol: $80,000 | Score: 0.80
 2026-03-22 05:53:03 | INFO     | Portfolio                 | OPENED [YES] Test market | Size: $17.50 | Fill: 0.601 | Contracts: 29.1 | Fees: $0.293 | Bankroll: $982.21
 2026-03-22 05:53:03 | INFO     | Portfolio                 | CLOSED [WIN] Test market | Exit: 1.000 | PnL: $+11.31 | Bankroll: $1011.31
+2026-03-22 21:20:42 | INFO     | Orchestrator              | Database backend: supabase
