@@ -1,0 +1,9 @@
+2026-03-22 05:53:03 | INFO     | Portfolio                 | Portfolio initialised with $1,000.00 virtual USDC
+2026-03-22 05:53:03 | INFO     | Portfolio                 | OPENED [YES] Will BTC be higher in 15 minutes? | Size: $50.00 | Fill: 0.655 | Contracts: 76.3 | Fees: $0.800 | Bankroll: $949.20
+2026-03-22 05:53:03 | INFO     | Portfolio                 | CLOSED [WIN] Will BTC be higher in 15 minutes? | Exit: 1.000 | PnL: $+25.52 | Bankroll: $1025.52
+2026-03-22 05:53:03 | INFO     | MarketScanner             | Top market: Will Bitcoin be higher in 15 minutes? | Vol: $50,000 | Score: 0.66
+2026-03-22 05:53:03 | INFO     | Portfolio                 | Portfolio initialised with $1,000.00 virtual USDC
+2026-03-22 05:53:03 | INFO     | Portfolio                 | Portfolio initialised with $1,000.00 virtual USDC
+2026-03-22 05:53:03 | INFO     | MarketScanner             | Top market: Will BTC be higher in 15 minutes? (flow test) | Vol: $80,000 | Score: 0.80
+2026-03-22 05:53:03 | INFO     | Portfolio                 | OPENED [YES] Test market | Size: $17.50 | Fill: 0.601 | Contracts: 29.1 | Fees: $0.293 | Bankroll: $982.21
+2026-03-22 05:53:03 | INFO     | Portfolio                 | CLOSED [WIN] Test market | Exit: 1.000 | PnL: $+11.31 | Bankroll: $1011.31
