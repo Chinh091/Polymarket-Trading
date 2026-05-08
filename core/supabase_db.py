@@ -1,4 +1,4 @@
-"""
+﻿"""
 core/supabase_db.py
 
 Supabase-backed database layer. Drop-in replacement for database.py.
@@ -33,7 +33,7 @@ def get_client():
 
 
 def init_database():
-    """No-op — schema is created via supabase_schema.sql in the dashboard."""
+    """No-op - schema is created via supabase_schema.sql in the dashboard."""
     logger.info("Supabase DB layer initialised (schema managed via supabase_schema.sql)")
 
 

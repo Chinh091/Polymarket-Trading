@@ -1,5 +1,5 @@
--- ============================================================
--- Polymarket Paper Trading Bot — Supabase Schema
+﻿-- ============================================================
+-- Polymarket Paper Trading Bot - Supabase Schema
 -- Run this in: Supabase Dashboard → SQL Editor → New Query
 -- ============================================================
 
@@ -144,7 +144,7 @@ INSERT INTO strategy_params (param_key, param_value, reason) VALUES
     ('news_poll_interval',    60.0,  'Seconds between news fetches')
 ON CONFLICT (param_key) DO NOTHING;
 
--- Enable Row Level Security (RLS) — anon key can read, service role can write
+-- Enable Row Level Security (RLS) - anon key can read, service role can write
 ALTER TABLE markets            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE paper_trades       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_signals      ENABLE ROW LEVEL SECURITY;

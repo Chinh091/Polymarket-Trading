@@ -1,4 +1,4 @@
-import type { Trade } from "@/lib/types";
+﻿import type { Trade } from "@/lib/types";
 
 interface Props {
   trades: Trade[];
@@ -45,15 +45,15 @@ export function TradesTable({ trades, showPnl = false }: Props) {
               <td className="py-2 pr-4 tabular-nums text-zinc-300">{t.fill_price.toFixed(3)}</td>
               {showPnl && (
                 <td className="py-2 pr-4 tabular-nums text-zinc-300">
-                  {t.exit_price != null ? t.exit_price.toFixed(3) : "—"}
+                  {t.exit_price != null ? t.exit_price.toFixed(3) : "-"}
                 </td>
               )}
               {showPnl && (
                 <td className={`py-2 pr-4 tabular-nums ${pnlColor(t.pnl)}`}>
-                  {t.pnl != null ? `${t.pnl >= 0 ? "+" : ""}$${t.pnl.toFixed(2)}` : "—"}
+                  {t.pnl != null ? `${t.pnl >= 0 ? "+" : ""}$${t.pnl.toFixed(2)}` : "-"}
                 </td>
               )}
-              <td className="py-2 pr-4 text-zinc-500">{t.agent_source ?? "—"}</td>
+              <td className="py-2 pr-4 text-zinc-500">{t.agent_source ?? "-"}</td>
               <td className="py-2 text-zinc-500">{t.opened_at?.slice(0, 16).replace("T", " ")}</td>
             </tr>
           ))}

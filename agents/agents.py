@@ -1,7 +1,7 @@
-"""
+﻿"""
 agents/agents.py
 All specialist agents. Each has a get_signal() method returning a dict.
-Agents never call each other — they publish independently to the orchestrator.
+Agents never call each other - they publish independently to the orchestrator.
 """
 import os
 import time
@@ -81,7 +81,7 @@ class BaseAgent:
 
 
 # ======================================================================
-# AGENT 1 — MARKET SCANNER
+# AGENT 1 - MARKET SCANNER
 # ======================================================================
 
 class MarketScannerAgent(BaseAgent):
@@ -122,7 +122,7 @@ class MarketScannerAgent(BaseAgent):
             entropy = ArbitrageAgent.shannon_entropy(yes_price)
 
             # LMSR bonus: price < 0.07 suggests the automated market maker
-            # has set an underpriced YES — structural edge from research.
+            # has set an underpriced YES - structural edge from research.
             lmsr_bonus = 0.25 if yes_price < 0.07 else 0.0
 
             total_score = (liquidity_score * 0.5) + (entropy * 0.35) + lmsr_bonus
@@ -204,7 +204,7 @@ class MarketScannerAgent(BaseAgent):
 
 
 # ======================================================================
-# AGENT 2 — ARBITRAGE AGENT
+# AGENT 2 - ARBITRAGE AGENT
 # ======================================================================
 
 class ArbitrageAgent(BaseAgent):
@@ -214,7 +214,7 @@ class ArbitrageAgent(BaseAgent):
     Core idea: On Polymarket 15-min BTC up/down markets, the YES price 
     should reflect the current probability of BTC being higher in 15 mins.
     When spot price has already moved strongly in one direction, but 
-    Polymarket price hasn't updated yet — that's the edge window.
+    Polymarket price hasn't updated yet - that's the edge window.
 
     Edge calculation:
     - BTC pumped +0.5% in last 60s → 15-min UP contract should be ~70%
@@ -262,7 +262,7 @@ class ArbitrageAgent(BaseAgent):
         Convert price momentum to implied win probability using log-odds transform.
 
         Log-odds filter (from research): signals where |log-odds| < 0.5 are noise.
-        |log-odds| > 0.5 means probability is outside 37.8%–62.2% — a real edge.
+        |log-odds| > 0.5 means probability is outside 37.8%–62.2% - a real edge.
 
         +1.0% move → raw ~72% → log-odds +0.94 → passes
         +0.5% move → raw ~65% → log-odds +0.62 → passes
@@ -273,10 +273,10 @@ class ArbitrageAgent(BaseAgent):
         raw = 0.5 + (momentum_pct / 4.0) * 0.5
         raw = max(0.05, min(0.95, raw))
 
-        # Log-odds transform — discard weak signals
+        # Log-odds transform - discard weak signals
         log_odds = math.log(raw / (1.0 - raw))
         if abs(log_odds) < 0.5:
-            return 0.5  # Too weak — caller checks for 0.5 and skips
+            return 0.5  # Too weak - caller checks for 0.5 and skips
 
         return raw
 
@@ -356,7 +356,7 @@ class ArbitrageAgent(BaseAgent):
 
 
 # ======================================================================
-# AGENT 3 — NEWS ANALYST AGENT
+# AGENT 3 - NEWS ANALYST AGENT
 # ======================================================================
 
 class NewsAnalystAgent(BaseAgent):
@@ -428,13 +428,13 @@ class NewsAnalystAgent(BaseAgent):
 
 
 # ======================================================================
-# AGENT 4 — RISK MANAGER
+# AGENT 4 - RISK MANAGER
 # ======================================================================
 
 class RiskManagerAgent(BaseAgent):
     """
     Validates every trade before it reaches the portfolio.
-    Acts as the final gatekeeper — if this says NO, nothing trades.
+    Acts as the final gatekeeper - if this says NO, nothing trades.
     """
 
     def __init__(self, portfolio=None):
@@ -461,7 +461,7 @@ class RiskManagerAgent(BaseAgent):
         # Rule 1: Max drawdown halt
         if drawdown >= self.max_drawdown_pct:
             self.logger.warning(
-                f"TRADING HALTED — drawdown {drawdown:.1%} >= {self.max_drawdown_pct:.1%}"
+                f"TRADING HALTED - drawdown {drawdown:.1%} >= {self.max_drawdown_pct:.1%}"
             )
             save_signal(self.name, None, "HALT",
                         raw_data={"drawdown": drawdown, "bankroll": bankroll})
@@ -489,7 +489,7 @@ class RiskManagerAgent(BaseAgent):
                 "adjusted_size": adjusted}
 
     def get_signal(self) -> dict:
-        """Passive monitoring — emits HALT signal if limits are breached."""
+        """Passive monitoring - emits HALT signal if limits are breached."""
         if not self.portfolio:
             return self._no_signal("No portfolio connected")
 
@@ -516,13 +516,13 @@ class RiskManagerAgent(BaseAgent):
 
 
 # ======================================================================
-# AGENT 5 — POSITION SIZER
+# AGENT 5 - POSITION SIZER
 # ======================================================================
 
 class PositionSizerAgent(BaseAgent):
     """
     Calculates optimal trade size using fractional Kelly criterion.
-    Full Kelly is too aggressive — we use 1/4 Kelly for safety.
+    Full Kelly is too aggressive - we use 1/4 Kelly for safety.
 
     Kelly formula: f = (edge / odds)
     Where edge = expected value above 0.5, odds = payout ratio (1:1 on binary)
@@ -574,12 +574,12 @@ class PositionSizerAgent(BaseAgent):
         return round(size, 2)
 
     def get_signal(self) -> dict:
-        """Passive agent — called directly via calculate_size(), not via signal loop."""
+        """Passive agent - called directly via calculate_size(), not via signal loop."""
         return self._no_signal("PositionSizer is called directly, not via signal loop")
 
 
 # ======================================================================
-# AGENT 7 — BAYES PRIOR AGENT
+# AGENT 7 - BAYES PRIOR AGENT
 # ======================================================================
 
 class BayesPriorAgent(BaseAgent):
@@ -609,7 +609,7 @@ class BayesPriorAgent(BaseAgent):
         ("BTCUSDT",  ["bitcoin", "btc"]),
         ("ETHUSDT",  ["ethereum", "eth"]),
         ("SOLUSDT",  ["solana", "sol"]),
-        # Stock price-level markets — use macro/momentum proxy via BTC correlation
+        # Stock price-level markets - use macro/momentum proxy via BTC correlation
         ("BTCUSDT",  ["mara", "marathon digital"]),
         ("BTCUSDT",  ["mgr", "mstr", "microstrategy"]),
     ]
@@ -737,7 +737,7 @@ class BayesPriorAgent(BaseAgent):
 
 
 # ======================================================================
-# AGENT 6 — OTM OPPORTUNITY AGENT
+# AGENT 6 - OTM OPPORTUNITY AGENT
 # ======================================================================
 
 class OTMOpportunityAgent(BaseAgent):
@@ -801,7 +801,7 @@ class OTMOpportunityAgent(BaseAgent):
                 # Strong downward momentum → upward price-level event less likely
                 return market_price * 0.6
             else:
-                return market_price  # Momentum too weak — no adjustment
+                return market_price  # Momentum too weak - no adjustment
 
         return market_price  # No matching symbol
 
@@ -847,7 +847,7 @@ class OTMOpportunityAgent(BaseAgent):
             log_odds = math.log(best_true_p / (1.0 - best_true_p))
             if abs(log_odds) < 0.3:
                 return self._no_signal(
-                    f"OTM estimate log-odds too weak ({log_odds:.2f}) — likely noise"
+                    f"OTM estimate log-odds too weak ({log_odds:.2f}) - likely noise"
                 )
 
         confidence = min(0.45 + (best_ev - self.min_ev) * 0.08, 0.78)

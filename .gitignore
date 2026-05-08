@@ -1,4 +1,4 @@
-# Environment — NEVER commit these
+# Environment - NEVER commit these
 .env
 .env.local
 *.env

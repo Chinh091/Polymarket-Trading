@@ -1,4 +1,4 @@
-import type { StrategyParam } from "@/lib/types";
+﻿import type { StrategyParam } from "@/lib/types";
 
 interface Props {
   params: StrategyParam[];
@@ -30,13 +30,13 @@ export function ParamsTable({ params }: Props) {
                   {p.param_value}
                 </td>
                 <td className="py-2 pr-6 tabular-nums text-zinc-500">
-                  {p.previous_value ?? "—"}
+                  {p.previous_value ?? "-"}
                 </td>
                 <td className="py-2 pr-6 text-zinc-500">
                   {p.updated_at?.slice(0, 10)}
                 </td>
                 <td className="py-2 text-zinc-500 max-w-[240px] truncate" title={p.reason ?? ""}>
-                  {p.reason ?? "—"}
+                  {p.reason ?? "-"}
                 </td>
               </tr>
             );

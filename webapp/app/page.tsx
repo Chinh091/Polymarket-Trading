@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabase";
+﻿import { supabase } from "@/lib/supabase";
 import type { Trade, PortfolioSnapshot, JournalEntry, StrategyParam } from "@/lib/types";
 import PortfolioChart from "@/components/PortfolioChart";
 import TradesTable from "@/components/TradesTable";
@@ -58,7 +58,7 @@ export default async function Dashboard() {
   const rejected  = journal.filter((j) => j.outcome === "rejected_opus").length;
   const filterPct = executed + rejected > 0
     ? ((rejected / (executed + rejected)) * 100).toFixed(0)
-    : "—";
+    : "-";
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 p-6">

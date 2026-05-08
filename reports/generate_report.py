@@ -1,4 +1,4 @@
-"""
+﻿"""
 reports/generate_report.py
 
 Generates a full end-of-day trading report from the SQLite database.
@@ -36,15 +36,15 @@ REPORTS_DIR = Path(__file__).parent
 
 
 def _pct(val):
-    return f"{val * 100:.1f}%" if val is not None else "—"
+    return f"{val * 100:.1f}%" if val is not None else "-"
 
 
 def _usd(val):
-    return f"${val:+.2f}" if val is not None else "—"
+    return f"${val:+.2f}" if val is not None else "-"
 
 
 def _safe(val, fmt=".2f"):
-    return format(val, fmt) if val is not None else "—"
+    return format(val, fmt) if val is not None else "-"
 
 
 def generate(target_date: str = None) -> str:
@@ -98,7 +98,7 @@ def generate(target_date: str = None) -> str:
     add   = lines.append
 
     # ── HEADER ────────────────────────────────────────────────────────
-    add(f"# Polymarket Paper Trading Bot — Daily Report")
+    add(f"# Polymarket Paper Trading Bot - Daily Report")
     add(f"**Date:** {target_date}  |  **Generated:** {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
     add("")
 
@@ -132,7 +132,7 @@ def generate(target_date: str = None) -> str:
     add("")
     add("**Opus 4.6 filter rate:** "
         f"{len(rej_opus)}/{len(rej_opus)+len(executed)} "
-        f"({'—' if not (rej_opus or executed) else f'{len(rej_opus)/(len(rej_opus)+len(executed))*100:.0f}%'} rejected)")
+        f"({'-' if not (rej_opus or executed) else f'{len(rej_opus)/(len(rej_opus)+len(executed))*100:.0f}%'} rejected)")
     add("")
 
     # ── EXECUTED TRADES ───────────────────────────────────────────────
@@ -151,7 +151,7 @@ def generate(target_date: str = None) -> str:
                 pnl = matching_trade.get("pnl", 0) or 0
                 outcome_str = f"  **Outcome:** {'✅ WIN' if pnl > 0 else '❌ LOSS'} {_usd(pnl)}"
 
-            add(f"### Trade {i}: {j.get('direction')} — {j.get('question', 'Unknown')[:90]}")
+            add(f"### Trade {i}: {j.get('direction')} - {j.get('question', 'Unknown')[:90]}")
             add("")
             add(f"| Field | Value |")
             add(f"|-------|-------|")
@@ -175,12 +175,12 @@ def generate(target_date: str = None) -> str:
                     add(f"- **{s.get('agent')}** (edge={s.get('edge_pct',0):.1f}%, "
                         f"conf={_pct(s.get('confidence'))}): {s.get('reason','')}")
             except Exception:
-                add(f"- Agents: {j.get('agent_sources', '—')}")
+                add(f"- Agents: {j.get('agent_sources', '-')}")
             add("")
 
             # Opus reasoning
             add(f"**Opus 4.6 verdict:** ✅ APPROVED")
-            add(f"> {j.get('opus_reasoning', '—')}")
+            add(f"> {j.get('opus_reasoning', '-')}")
             add("")
 
     # ── OPUS REJECTIONS ───────────────────────────────────────────────
@@ -193,9 +193,9 @@ def generate(target_date: str = None) -> str:
         add("_No rejections today._")
     else:
         for i, j in enumerate(rej_opus, 1):
-            add(f"### Rejected {i}: {j.get('direction')} — {j.get('question','')[:90]}")
+            add(f"### Rejected {i}: {j.get('direction')} - {j.get('question','')[:90]}")
             add("")
-            add(f"- **Agents:** {j.get('agent_sources', '—')}")
+            add(f"- **Agents:** {j.get('agent_sources', '-')}")
             add(f"- **Size:** ${j.get('proposed_size', 0):.2f} | "
                 f"**Edge:** {j.get('avg_edge', 0):.1f}% | "
                 f"**Entry:** {j.get('entry_price', 0):.3f}")
@@ -209,7 +209,7 @@ def generate(target_date: str = None) -> str:
             except Exception:
                 pass
             add("")
-            add(f"  **Opus reasoning:** {j.get('opus_reasoning', '—')}")
+            add(f"  **Opus reasoning:** {j.get('opus_reasoning', '-')}")
             add("")
 
     # ── RISK BLOCKS ───────────────────────────────────────────────────
@@ -218,7 +218,7 @@ def generate(target_date: str = None) -> str:
         add("")
         for j in rej_risk:
             add(f"- **{j.get('direction')}** on {j.get('question','')[:70]} "
-                f"— {j.get('opus_reasoning', '—')}")
+                f"- {j.get('opus_reasoning', '-')}")
         add("")
 
     # ── CLOSED TRADE OUTCOMES ─────────────────────────────────────────
@@ -240,7 +240,7 @@ def generate(target_date: str = None) -> str:
                 f"| {t.get('exit_price',0):.3f} "
                 f"| {icon} {_usd(pnl)} "
                 f"| ${(t.get('taker_fee',0) or 0)+(t.get('gas_cost',0) or 0):.3f} "
-                f"| {t.get('agent_source','—')} |"
+                f"| {t.get('agent_source','-')} |"
             )
         add("")
 
@@ -294,7 +294,7 @@ def generate(target_date: str = None) -> str:
         add("")
         for j in all_rej_op[-10:]:
             add(f"- [{j.get('direction')}] {j.get('question','')[:60]}…")
-            add(f"  > {j.get('opus_reasoning','—')}")
+            add(f"  > {j.get('opus_reasoning','-')}")
         add("")
 
     # ── IMPROVEMENT RECOMMENDATIONS ───────────────────────────────────
@@ -304,23 +304,23 @@ def generate(target_date: str = None) -> str:
     issues = []
 
     if total_fees > abs(total_pnl) and closed:
-        issues.append("⚠️  **Fees exceed PnL** — consider raising `min_edge` threshold "
+        issues.append("⚠️  **Fees exceed PnL** - consider raising `min_edge` threshold "
                        "or reducing trade frequency.")
 
     if filter_rate > 70:
-        issues.append("⚠️  **Opus rejecting >70% of trades** — agent signals may be too noisy. "
+        issues.append("⚠️  **Opus rejecting >70% of trades** - agent signals may be too noisy. "
                        "Review agent reasoning patterns in the Rejections section above.")
 
     if filter_rate < 10 and total_seen > 5:
-        issues.append("ℹ️  **Opus approving nearly everything** — consider tightening "
+        issues.append("ℹ️  **Opus approving nearly everything** - consider tightening "
                        "the Opus prompt or raising the consensus threshold.")
 
     if win_rate > 0 and win_rate < 40 and len(closed) >= 5:
-        issues.append("⚠️  **Win rate below 40%** — review which agent combinations "
+        issues.append("⚠️  **Win rate below 40%** - review which agent combinations "
                        "are generating losing trades. Raise `min_confidence` threshold.")
 
     if len(rej_opus) > len(executed) * 2:
-        issues.append("ℹ️  **Many Opus rejections vs executions** — use the Rejections "
+        issues.append("ℹ️  **Many Opus rejections vs executions** - use the Rejections "
                        "section to identify if a specific agent is generating bad signals.")
 
     if not issues:
@@ -332,7 +332,7 @@ def generate(target_date: str = None) -> str:
 
     # ── FOOTER ────────────────────────────────────────────────────────
     add("---")
-    add("_Generated by Polymarket Paper Trading Bot | Paper trading only — not financial advice_")
+    add("_Generated by Polymarket Paper Trading Bot | Paper trading only - not financial advice_")
 
     return "\n".join(lines)
 

@@ -1,25 +1,145 @@
 # Polymarket Paper Trading Bot
 
-A multi-agent paper trading simulation for Polymarket prediction markets.
-Uses real live market data but executes all trades with virtual money.
-Built to gather 30+ days of clean performance data before risking real capital.
+A multi-agent, mathematically-grounded paper trading system for Polymarket prediction markets.
+Runs six specialist agents in parallel, requires consensus before any trade, and routes every
+decision through a Claude Opus 4.6 LLM gate before execution.
 
 **Status: Paper trading only. No real funds are ever touched.**
 
 ---
 
-## What This Bot Does
+## Overview
 
-Polymarket is a prediction market where you buy YES/NO contracts on real-world events.
-Prices range from $0.01 to $0.99 and represent the market's implied probability.
-A YES contract bought at $0.60 pays $1.00 if the event happens — that's a 67% return.
+Polymarket is an on-chain prediction market where YES/NO contracts are priced as implied
+probabilities between $0.01 and $0.99. A YES contract bought at $0.40 pays $1.00 if the
+event resolves YES - a 150% return. The market is efficient but not perfectly so: there
+are exploitable edges in crypto price-level contracts when spot price momentum has not yet
+propagated into Polymarket implied probabilities.
 
-This bot runs five specialist agents in parallel. Each agent watches one data source
-and emits a signal when it sees an opportunity. The orchestrator requires at least
-two agents to agree before placing a paper trade. Every trade simulates exact
-real-world costs: 1.56% taker fee, $0.02 gas, and realistic slippage.
+This system was built to:
 
-The goal is to find out which strategy generates real edge before going live.
+1. Identify mispricings using multiple independent mathematical signals
+2. Require cross-agent consensus before committing capital (noise reduction)
+3. Size positions using fractional Kelly criterion (bankroll-optimal, variance-managed)
+4. Paper trade for 30+ days to validate edge before any live deployment
+
+---
+
+## Mathematical Models
+
+This is the core intellectual contribution of the project. Each agent implements a distinct
+quantitative model.
+
+### 1. Shannon Entropy (Market Uncertainty Score)
+
+Used by `MarketScannerAgent` to score which markets offer the most opportunity.
+
+```
+H(p) = -p * log2(p) - (1 - p) * log2(1 - p)
+```
+
+- H = 1.0 at p = 0.5 (maximum uncertainty, maximum opportunity)
+- H approaches 0 near p = 0 or p = 1 (market has converged, no edge)
+- Markets near resolution are excluded even if volume is high
+
+### 2. Log-Odds Filter (Noise Rejection)
+
+Applied by `ArbitrageAgent`, `BayesPriorAgent`, and `OTMOpportunityAgent` to discard
+signals that are statistically indistinguishable from noise.
+
+```
+log_odds = ln(p / (1 - p))
+
+|log_odds| < 0.5  =>  discard (probability between 37.8% and 62.2%)
+|log_odds| >= 0.5 =>  signal is strong enough to act on
+```
+
+Rationale: small momentum moves produce probabilities near 50% where the log-odds are
+compressed and the signal-to-noise ratio is too low to trade profitably after fees.
+
+### 3. Momentum-to-Probability Mapping (ArbitrageAgent)
+
+Converts Binance spot price momentum into an implied win probability for Polymarket
+crypto contracts.
+
+```
+raw_p = 0.5 + (momentum_pct / 4.0) * 0.5
+raw_p = clamp(raw_p, 0.05, 0.95)
+
+# Then apply log-odds filter before trading
+```
+
+Example: BTC moves +1.0% in 60 seconds.
+- raw_p = 0.5 + (1.0 / 4.0) * 0.5 = 0.625
+- log_odds = ln(0.625 / 0.375) = 0.51 -- passes filter
+- Polymarket 15-min BTC-up contract still shows 50% -- edge = 12.5% before fees
+
+### 4. Bayesian Prior Mapping (BayesPriorAgent)
+
+Implements a skeptical Bayesian update that penalises low-probability events before
+accepting them as underpriced.
+
+```
+prior = p^2              (skeptical prior: always < p for p in (0, 1))
+B     = estimated true probability from momentum signal
+M     = B - p^2          (mapping function)
+
+M > +0.06  =>  YES underpriced, buy YES
+M < -0.06  =>  YES overpriced, buy NO
+```
+
+Example: market price p = 0.30, estimated true prob B = 0.50.
+
+```
+prior = 0.30^2 = 0.09
+M     = 0.50 - 0.09 = +0.41   (strongly underpriced -> buy YES)
+```
+
+The p^2 squashing means the agent demands proportionally stronger evidence for
+low-probability events - a built-in overconfidence correction.
+
+### 5. Expected Value Ratio (OTMOpportunityAgent)
+
+Targets out-of-the-money contracts priced 4%-10% where momentum suggests
+the true probability is materially higher.
+
+```
+EV_ratio = estimated_true_prob / market_price
+
+EV_ratio >= 1.8x  =>  trade
+EV_ratio <  1.8x  =>  skip
+```
+
+Example: market prices YES at 5%, Binance momentum suggests true prob is 10%.
+- EV_ratio = 0.10 / 0.05 = 2.0x -- exceeds threshold
+- Edge after 1.56% taker fee = (0.10 - 0.05 - 0.0156) * 100 = 3.44%
+
+The 1.8x threshold is calibrated to clear the taker fee and leave a positive
+expected value with meaningful margin.
+
+### 6. Quarter-Kelly Position Sizing (PositionSizerAgent)
+
+Full Kelly criterion maximises long-run bankroll growth but is extremely sensitive
+to edge estimation errors. This system uses quarter-Kelly for safety.
+
+```
+full_kelly    = edge_decimal * confidence
+quarter_kelly = full_kelly * 0.25
+bet_size      = bankroll * quarter_kelly
+
+# Hard bounds: min $5, max 5% of bankroll
+```
+
+Example: edge = 15%, confidence = 0.70, bankroll = $1,000.
+
+```
+full_kelly    = 0.15 * 0.70 = 0.105  (10.5% of bankroll)
+quarter_kelly = 0.105 * 0.25 = 0.026 (2.6% of bankroll)
+bet_size      = $1,000 * 0.026 = $26
+```
+
+Quarter-Kelly gives the same growth direction as full Kelly at roughly one quarter
+of the variance. With noisy edge estimates, this is the right tradeoff.
 
 ---
 
@@ -27,27 +147,133 @@ The goal is to find out which strategy generates real edge before going live.
 
 ```
 Data Sources (Layer 0)
-  Polymarket Gamma API   →  market discovery, volumes, questions
-  Polymarket CLOB API    →  live orderbook depth, bid/ask prices
-  Binance WebSocket      →  real-time BTC/ETH/SOL spot prices
-  NewsAPI                →  headlines (free tier, 100 calls/day)
+  Polymarket Gamma API   ->  market discovery, volumes, questions
+  Polymarket CLOB API    ->  live orderbook depth, bid/ask prices
+  Binance REST/WebSocket ->  real-time BTC/ETH/SOL spot prices (no API key needed)
+  NewsAPI                ->  headlines (free tier, 100 calls/day)
 
-Specialist Agents (Layer 1) — each owns one job
-  MarketScannerAgent     →  finds high-volume, liquid markets
-  ArbitrageAgent         →  detects Binance momentum vs Polymarket lag
-  NewsAnalystAgent       →  scores headlines for market impact
-  RiskManagerAgent       →  enforces drawdown/position limits
-  PositionSizerAgent     →  quarter-Kelly criterion sizing
+Specialist Agents (Layer 1) - each owns one signal type
+  MarketScannerAgent     ->  entropy + liquidity scoring
+  ArbitrageAgent         ->  Binance momentum vs Polymarket lag
+  NewsAnalystAgent       ->  keyword-scored headline signals
+  OTMOpportunityAgent    ->  EV ratio on underpriced OTM contracts
+  BayesPriorAgent        ->  Bayesian p^2 prior mapping
+  RiskManagerAgent       ->  drawdown and position limit enforcement
 
 Orchestrator (Layer 2)
-  MasterOrchestrator     →  consensus logic, trade approval, routing
+  MasterOrchestrator     ->  consensus logic (2+ agents must agree), routing
 
-Paper Trading Engine (Layer 3)
-  VirtualPortfolio       →  $1,000 virtual USDC, exact fee simulation
-  Trade Logger           →  all trades stored to SQLite
+LLM Gate (Layer 3)
+  Claude Opus 4.6        ->  final APPROVE/REJECT on every trade attempt
 
-Dashboard (Layer 4)
-  Streamlit app          →  live PnL curve, signals, open positions
+Paper Trading Engine (Layer 4)
+  VirtualPortfolio       ->  $1,000 virtual USDC, exact fee + slippage simulation
+  Trade Journal          ->  all decisions stored (executed, rejected, blocked)
+
+Dashboard (Layer 5)
+  Streamlit (Python)     ->  local PnL curve, signals, open positions
+  Next.js + Supabase     ->  hosted dashboard with daily reports
+```
+
+---
+
+## Trade Execution Pipeline
+
+Every trade goes through four sequential gates. All four must pass.
+
+```
+1. CONSENSUS
+   2+ agents agree on same market + same direction within a 5-minute window.
+   Single-agent signals are logged but never executed.
+
+2. RISK VALIDATION (RiskManagerAgent)
+   - Max drawdown: halt all trading if drawdown >= 15%
+   - Max open positions: reject if 3 already open
+   - Max position size: cap at 5% of bankroll
+   - Minimum viable size: reject if < $5
+
+3. POSITION SIZING (PositionSizerAgent)
+   Quarter-Kelly formula applied using average edge and confidence
+   across all agreeing agents.
+
+4. OPUS 4.6 LLM GATE
+   Claude Opus 4.6 receives full trade context:
+   market question, direction, size, edge estimate, agent reasoning.
+   Returns APPROVE or REJECT only - no hedging.
+   Any error or non-JSON response defaults to REJECT.
+```
+
+---
+
+## Agents
+
+### MarketScannerAgent
+
+Scans all active markets every 60 seconds. Scores each by:
+
+```
+score = (liquidity_score * 0.5) + (shannon_entropy * 0.35) + lmsr_bonus
+
+liquidity_score = min(volume / 100_000, 1.0)
+lmsr_bonus      = 0.25 if yes_price < 0.07 else 0.0
+```
+
+Filters: volume > $10,000 and price between 5% and 95%.
+Direction: YES if price < 0.5, NO if price > 0.5.
+
+### ArbitrageAgent
+
+Tracks BTC/ETH/SOL price history in memory (last 5 minutes).
+Checks every 5 seconds via Binance REST (no API key required).
+
+```python
+momentum_pct = (new_price - old_price) / old_price * 100
+true_prob    = momentum_to_probability(momentum_pct)  # log-odds filtered
+edge         = true_prob - market_price - 0.0156      # subtract taker fee
+```
+
+Signals only when edge > 5% after fees.
+
+### OTMOpportunityAgent
+
+Targets YES prices in the 4%-10% range.
+Uses 5-minute Binance momentum to estimate true probability.
+Signals when EV ratio >= 1.8x after fees.
+
+### BayesPriorAgent
+
+Targets crypto and crypto-correlated stock markets (BTC, ETH, SOL, MARA, MSTR).
+Uses 5-minute momentum and the p^2 skeptical prior.
+Signals when |M| > 0.06 and edge survives the 1.56% fee.
+
+### NewsAnalystAgent
+
+Fetches headlines from NewsAPI. Scores by keyword matching (works without AI).
+Optionally upgrades to Claude Haiku analysis when `ANTHROPIC_API_KEY` is set.
+Signals only when score >= 7/10 and confidence >= 60%.
+
+### RiskManagerAgent
+
+Passive gatekeeper - does not generate trade signals.
+Monitors drawdown and position count continuously.
+Emits a HALT signal if the 15% drawdown limit is breached.
+
+---
+
+## Fee Simulation
+
+Every paper trade applies exact real-world costs so performance data is accurate.
+
+```
+Taker order (market buy):  1.56% of trade size
+Maker order (limit order): 0.00% (earns rebate in reality)
+Gas per transaction:       $0.02 (Polygon network)
+
+Slippage (order < $50):    +0.1%
+Slippage ($50 - $200):     +0.5%
+Slippage ($200 - $1,000):  +1.0%
+Slippage (> $1,000):       +2.0%
+With real orderbook:       walks book levels for exact average fill price
 ```
 
 ---
@@ -55,99 +281,40 @@ Dashboard (Layer 4)
 ## File Structure
 
 ```
-polymarket_bot/
-│
-├── run.py                    Entry point. Starts all agents and orchestrator.
-├── requirements.txt          All Python dependencies.
-├── .env.example              Config template. Copy to .env before running.
-│
-├── core/
-│   ├── database.py           SQLite schema and all read/write functions.
-│   │                         Tables: markets, price_snapshots, spot_prices,
-│   │                                 agent_signals, paper_trades,
-│   │                                 portfolio_snapshots, news_log
-│   │
-│   ├── portfolio.py          VirtualPortfolio class.
-│   │                         open_position() — simulates a buy with exact fees
-│   │                         close_position() — resolves trade, calculates PnL
-│   │                         get_stats() — returns win rate, Sharpe, drawdown
-│   │
-│   ├── orchestrator.py       MasterOrchestrator class.
-│   │                         Runs each agent in a background thread.
-│   │                         Collects signals via Python Queue.
-│   │                         Fires trades when 2+ agents agree (consensus).
-│   │
-│   └── logger.py             Shared logger. Writes to logs/bot_YYYYMMDD.log
-│                             and stdout simultaneously.
-│
-├── agents/
-│   └── agents.py             All five agents in one file.
-│
-│       BaseAgent             Parent class. Defines get_signal() contract.
-│                             Every agent returns:
-│                             { agent, condition_id, signal_type, direction,
-│                               confidence (0-1), edge_pct, reason, data }
-│
-│       MarketScannerAgent    Reads markets table from DB.
-│                             Scores by: volume (60%) + uncertainty (40%).
-│                             Filters: volume > $10k, price between 0.05-0.95.
-│                             Runs every MARKET_SCAN_INTERVAL seconds (default 60).
-│
-│       ArbitrageAgent        Tracks BTC/ETH/SOL price history in memory.
-│                             Calculates momentum over last 60 seconds.
-│                             Converts momentum % to implied probability.
-│                             Flags when edge vs Polymarket price > 5% after fees.
-│                             update_price(symbol, price) called on every tick.
-│
-│       NewsAnalystAgent      Fetches headlines from NewsAPI.
-│                             Scores by keyword matching (no API key needed).
-│                             Upgrades to Claude Haiku if ANTHROPIC_API_KEY set.
-│                             Only signals when score >= 7/10 AND confidence > 0.6.
-│
-│       RiskManagerAgent      validate_trade(signal, size) → {approved, reason, adjusted_size}
-│                             Hard rules: max drawdown halt, max 3 open positions.
-│                             Soft rules: caps position at 5% of bankroll.
-│                             get_signal() monitors continuously, emits HALT if needed.
-│
-│       PositionSizerAgent    calculate_size(bankroll, edge_pct, confidence) → float
-│                             Formula: Kelly fraction = edge × confidence × 0.25
-│                             Bounds: min $5, max 5% of bankroll.
-│
-├── data/
-│   ├── polymarket_fetcher.py PolymarketFetcher class.
-│   │                         fetch_active_markets() — Gamma API, returns list
-│   │                         fetch_crypto_markets() — filters for 15-min markets
-│   │                         fetch_orderbook(token_id) — CLOB orderbook depth
-│   │                         fetch_spread(token_id) — best bid/ask
-│   │                         stream_prices(token_ids, callback) — async WebSocket
-│   │                         get_implied_probability(token_id) — mid price = probability
-│   │
-│   ├── binance_fetcher.py    BinanceFetcher class.
-│   │                         fetch_all_prices_rest() — one-shot REST fetch
-│   │                         stream_prices(callback) — async WebSocket stream
-│   │                         Tracks: BTCUSDT, ETHUSDT, SOLUSDT
-│   │                         No API key required (public endpoints).
-│   │
-│   └── news_fetcher.py       NewsFetcher class.
-│                             fetch_headlines(query) — NewsAPI REST call
-│                             score_headline(headline) → {score, direction, confidence}
-│                             analyse_with_ai(headline) — Claude Haiku (optional)
-│                             process_and_store(headlines) — scores + saves to DB
-│                             Works fully without any API keys (keyword scoring).
-│
-├── dashboard/
-│   └── app.py                Streamlit dashboard. Auto-refreshes every 30s.
-│                             Shows: bankroll curve, PnL, open positions,
-│                             agent signals feed, trade history, active markets.
-│
-├── data/
-│   └── polymarket_bot.db     SQLite database (created automatically on first run).
-│
-├── logs/
-│   └── bot_YYYYMMDD.log      Daily rotating log file.
-│
-└── tests/
-    └── test_all.py           8 component tests. Run before run.py to verify setup.
+polymarket-trading/
+|
++-- run.py                    Entry point. Starts all agents and orchestrator.
++-- requirements.txt          All Python dependencies.
++-- .env.example              Config template. Copy to .env before running.
+|
++-- core/
+|   +-- orchestrator.py       MasterOrchestrator: consensus, Opus gate, routing.
+|   +-- portfolio.py          VirtualPortfolio: fee sim, slippage, PnL tracking.
+|   +-- database.py           SQLite schema and all read/write functions.
+|   +-- supabase_db.py        Supabase backend (auto-selected when SUPABASE_URL set).
+|   +-- logger.py             Shared rotating logger.
+|
++-- agents/
+|   +-- agents.py             All six agents + BaseAgent contract.
+|
++-- data/
+|   +-- polymarket_fetcher.py Gamma API + CLOB API + WebSocket stream.
+|   +-- binance_fetcher.py    BTC/ETH/SOL price feed (no API key needed).
+|   +-- news_fetcher.py       NewsAPI + keyword scoring + optional Haiku analysis.
+|
++-- research/
+|   +-- strategy_researcher.py Autonomous parameter optimizer (Opus-assisted).
+|
++-- reports/
+|   +-- generate_report.py    End-of-day markdown report generator.
+|
++-- dashboard/
+|   +-- app.py                Streamlit dashboard (local).
+|
++-- webapp/                   Next.js hosted dashboard (Vercel + Supabase).
+|
++-- tests/
+|   +-- test_all.py           8 component tests. No network required.
 ```
 
 ---
@@ -160,7 +327,7 @@ pip install -r requirements.txt
 
 # 2. Configure environment
 cp .env.example .env
-# Edit .env — add NEWS_API_KEY at minimum (free at newsapi.org)
+# Edit .env - add NEWS_API_KEY at minimum (free at newsapi.org)
 
 # 3. Verify everything works
 python tests/test_all.py
@@ -175,130 +342,62 @@ streamlit run dashboard/app.py
 
 ---
 
-## Environment Variables (.env)
+## Environment Variables
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `NEWS_API_KEY` | Recommended | — | Free at newsapi.org. 100 requests/day on free tier. Without it, bot uses mock headlines. |
-| `ANTHROPIC_API_KEY` | Optional | — | Enables Claude Haiku news analysis. Free $5 credit at platform.anthropic.com. Without it, keyword scoring is used instead. |
-| `STARTING_BANKROLL` | No | 1000.0 | Virtual USDC starting balance |
-| `MAX_POSITION_PCT` | No | 0.05 | Max single position as % of bankroll (5%) |
-| `MAX_OPEN_POSITIONS` | No | 3 | Max concurrent open trades |
-| `MAX_DRAWDOWN_PCT` | No | 0.15 | Halt trading if drawdown exceeds this (15%) |
-| `MARKET_SCAN_INTERVAL` | No | 60 | Seconds between market scans |
-| `NEWS_POLL_INTERVAL` | No | 60 | Seconds between news fetches |
-
----
-
-## Fee Simulation (1:1 with real Polymarket)
-
-Every paper trade applies exact real-world costs so data is accurate.
-
-```
-Taker order (market buy/sell):  1.56% of trade size
-Maker order (limit order):       0.00% (earns rebate in reality)
-Gas cost per transaction:        $0.02 (Polygon network)
-Slippage (< $50 order):         ~0.1%
-Slippage ($50–$200 order):      ~0.5%
-Slippage ($200–$1000 order):    ~1.0%
-Slippage (> $1000 order):       ~2.0%
-Slippage with real orderbook:   walks book for exact fill price
-```
-
----
-
-## Agent Signal Contract
-
-Every agent's `get_signal()` returns this exact dict:
-
-```python
-{
-    "agent":        str,          # Agent name e.g. "ArbitrageAgent"
-    "condition_id": str | None,   # Polymarket market ID
-    "signal_type":  str,          # "TRADE" | "SKIP" | "HALT" | "INFO"
-    "direction":    str | None,   # "YES" | "NO" | None
-    "confidence":   float,        # 0.0 to 1.0
-    "edge_pct":     float,        # Expected edge % after fees
-    "reason":       str,          # Human-readable explanation
-    "data":         dict          # Agent-specific extra data
-}
-```
-
-To add a new agent: subclass `BaseAgent`, implement `get_signal()`,
-instantiate in `MasterOrchestrator.__init__()`, add a thread in `start()`.
-
----
-
-## Consensus Logic
-
-The orchestrator requires **2 or more agents** to agree before placing a trade.
-"Agree" means: same `condition_id` + same `direction` within a 5-minute window.
-
-```
-ArbitrageAgent  →  TRADE YES on condition_id="abc123"  (edge 12%)
-MarketScanner   →  TRADE YES on condition_id="abc123"  (score 0.80)
-                                    ↓
-              Consensus: 2 agents agree → proceed
-                                    ↓
-              RiskManager validates size and drawdown
-                                    ↓
-              PositionSizer calculates quarter-Kelly amount
-                                    ↓
-              VirtualPortfolio.open_position() executes
-```
-
-To change the threshold: set `self.min_consensus` in `MasterOrchestrator`.
+| `NEWS_API_KEY` | Recommended | - | Free at newsapi.org. 100 requests/day. Without it, bot uses mock headlines. |
+| `ANTHROPIC_API_KEY` | Optional | - | Enables Claude Opus gate + Haiku news analysis. Without it, Opus gate is bypassed. |
+| `SUPABASE_URL` | Optional | - | Enables Supabase backend instead of SQLite. |
+| `SUPABASE_KEY` | Optional | - | Supabase anon key. Required when SUPABASE_URL is set. |
+| `STARTING_BANKROLL` | No | 1000.0 | Virtual USDC starting balance. |
+| `MAX_POSITION_PCT` | No | 0.05 | Max single position as % of bankroll. |
+| `MAX_OPEN_POSITIONS` | No | 3 | Max concurrent open trades. |
+| `MAX_DRAWDOWN_PCT` | No | 0.15 | Halt trading if drawdown exceeds this. |
+| `MARKET_SCAN_INTERVAL` | No | 60 | Seconds between market scans. |
+| `NEWS_POLL_INTERVAL` | No | 60 | Seconds between news fetches. |
 
 ---
 
 ## Database Schema
 
-All data lives in `data/polymarket_bot.db` (SQLite).
+SQLite by default (`data/polymarket_bot.db`). Switches to Supabase when `SUPABASE_URL` is set.
 
 | Table | What it stores |
 |---|---|
 | `markets` | Active Polymarket markets with prices and volumes |
 | `price_snapshots` | Orderbook snapshots (bid/ask/spread) per market per tick |
 | `spot_prices` | Binance BTC/ETH/SOL price history |
-| `agent_signals` | Every signal from every agent with timestamp |
+| `agent_signals` | Every signal from every agent with full context |
 | `paper_trades` | Full trade record: entry, exit, fees, PnL, agent source |
 | `portfolio_snapshots` | Bankroll value over time (for PnL curve) |
-| `news_log` | All headlines with relevance score and AI signal |
+| `news_log` | All headlines with relevance score and direction signal |
+| `trade_journal` | Full decision context: executed, Opus-rejected, and risk-blocked trades |
 
-Query example:
-```bash
-sqlite3 data/polymarket_bot.db "SELECT * FROM paper_trades ORDER BY opened_at DESC LIMIT 10;"
+Useful queries after running the bot:
+
+```sql
+-- Which agent combos are most profitable?
+SELECT agent_source, COUNT(*) trades, SUM(pnl) total_pnl, AVG(pnl) avg_pnl
+FROM paper_trades WHERE status = 'closed'
+GROUP BY agent_source ORDER BY total_pnl DESC;
+
+-- Win rate by direction
+SELECT direction, COUNT(*) trades,
+       SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) wins
+FROM paper_trades WHERE status = 'closed'
+GROUP BY direction;
+
+-- Fee drag vs gross PnL
+SELECT SUM(taker_fee + gas_cost) total_fees,
+       SUM(pnl) gross_pnl,
+       SUM(taker_fee + gas_cost) / ABS(SUM(pnl)) fee_ratio
+FROM paper_trades WHERE status = 'closed';
 ```
 
 ---
 
-## Key Design Decisions
-
-**Why quarter-Kelly?** Full Kelly maximises long-run growth but requires a perfectly
-calibrated edge estimate. Since we're estimating edge from imperfect signals,
-quarter-Kelly provides a 75% safety margin against over-betting.
-
-**Why SQLite?** Simplicity for paper trading phase. Zero setup, portable,
-queryable with any tool. Upgrade to Postgres when going live.
-
-**Why keyword scoring without AI?** The bot is fully functional without any
-API keys. NewsAPI + keyword scoring is good enough to identify high-impact
-headlines. Claude Haiku is an optional upgrade for better direction accuracy.
-
-**Why consensus from 2 agents?** Single-agent signals have high false-positive
-rates. Requiring two independent signals to agree on the same market
-significantly reduces noise trades. The 5-minute window is wide enough to
-catch agents that scan at different intervals.
-
-**Why threads not asyncio?** Simplicity. Each agent runs in its own thread
-with its own error handling. One agent crashing doesn't kill the others.
-The signal queue is the only shared state.
-
----
-
-## Extending the Bot
-
-### Add a new agent
+## Adding a New Agent
 
 ```python
 # agents/agents.py
@@ -307,7 +406,6 @@ class MyNewAgent(BaseAgent):
         super().__init__("MyNewAgent")
 
     def get_signal(self) -> dict:
-        # your logic here
         if found_opportunity:
             return self._trade_signal(
                 condition_id="abc123",
@@ -320,33 +418,15 @@ class MyNewAgent(BaseAgent):
         return self._no_signal("No opportunity found")
 ```
 
-Then in `core/orchestrator.py`, add to `__init__`:
-```python
-self.my_agent = MyNewAgent()
-```
+Then in `core/orchestrator.py`:
 
-And add a thread in `start()`:
 ```python
+# __init__
+self.my_agent = MyNewAgent()
+
+# start() - add a thread
 Thread(target=self._run_my_agent, daemon=True, name="MyAgent").start()
 ```
-
-### Change consensus threshold
-
-```python
-# core/orchestrator.py
-self.min_consensus = 3      # require 3 agents instead of 2
-self.consensus_window = 600 # extend window to 10 minutes
-```
-
-### Upgrade to live trading (future)
-
-Replace `VirtualPortfolio.open_position()` with a real CLOB order:
-```python
-from py_clob_client.client import ClobClient
-client = ClobClient("https://clob.polymarket.com", key=PRIVATE_KEY, chain_id=137)
-# place real order here
-```
-**Only do this after 30+ days of profitable paper trading.**
 
 ---
 
@@ -356,43 +436,56 @@ client = ClobClient("https://clob.polymarket.com", key=PRIVATE_KEY, chain_id=137
 python tests/test_all.py
 ```
 
-Tests cover: database init, portfolio open/close, market scanner,
-arbitrage momentum, news keyword scoring, risk validation,
-Kelly sizing, and full end-to-end trade flow.
-
-All tests use mock data — no real API calls, no network required.
+Covers: database init, portfolio open/close, market scanner, arbitrage momentum,
+news keyword scoring, risk validation, Kelly sizing, and full end-to-end trade flow.
+All tests use mock data - no real API calls, no network required.
 
 ---
 
-## What to Review After 30 Days
+## Upgrading to Live Trading
 
-Open `data/polymarket_bot.db` and check:
+Replace `VirtualPortfolio.open_position()` with a real CLOB order:
 
-```sql
--- Which agent generates the most profitable trades?
-SELECT agent_source, COUNT(*) trades, SUM(pnl) total_pnl, AVG(pnl) avg_pnl
-FROM paper_trades WHERE status='closed'
-GROUP BY agent_source ORDER BY total_pnl DESC;
-
--- What's the win rate per direction?
-SELECT direction, COUNT(*) trades,
-       SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) wins
-FROM paper_trades WHERE status='closed'
-GROUP BY direction;
-
--- How much are fees eating into profits?
-SELECT SUM(taker_fee + gas_cost) total_fees, SUM(pnl) total_pnl,
-       SUM(taker_fee + gas_cost) / ABS(SUM(pnl)) fee_ratio
-FROM paper_trades WHERE status='closed';
+```python
+from py_clob_client.client import ClobClient
+client = ClobClient("https://clob.polymarket.com", key=PRIVATE_KEY, chain_id=137)
+# place real limit or market order here
 ```
+
+**Only do this after 30+ days of profitable paper trading with stable edge estimates.**
+
+---
+
+## Design Decisions
+
+**Why quarter-Kelly?** Full Kelly maximises long-run growth only when edge estimates are
+perfect. Since our edge comes from noisy momentum signals, quarter-Kelly provides a 75%
+safety margin. It is the standard choice in systematic trading before live calibration.
+
+**Why consensus from 2 agents?** Single-agent signals have high false-positive rates on
+prediction markets. Requiring two independent mathematical signals to agree on the same
+market substantially reduces noise trades. The 5-minute consensus window is wide enough
+to catch agents running on different scan intervals.
+
+**Why Opus 4.6 as the gate?** The LLM gate is not a quant model - it is a sanity checker.
+It reads the agent reasoning and rejects trades where the logic is internally inconsistent
+(e.g. direction and stated edge do not match). It adds a qualitative filter that pure
+quantitative rules cannot easily express.
+
+**Why threads not asyncio?** Each agent runs in its own thread with isolated error handling.
+One agent crashing does not affect others. The signal queue is the only shared state,
+which keeps the concurrency model simple and auditable.
+
+**Why SQLite first?** Zero setup, fully portable, directly queryable. The schema is
+identical to the Supabase schema so migration is a single env var change.
 
 ---
 
 ## Warnings
 
 - This is a paper trading simulator. It does not place real trades.
-- Polymarket is geo-restricted — check your local regulations before live trading.
+- Polymarket is geo-restricted. Check your local regulations before live trading.
 - Past paper trading performance does not guarantee live trading performance.
-- The arbitrage window on Polymarket has compressed significantly since 2024.
-  Edge estimates from the ArbitrageAgent are approximate, not guaranteed.
+- The arbitrage window on Polymarket has compressed since 2024. Edge estimates from
+  ArbitrageAgent are approximate and must be validated against at least 30 days of data.
 - Never trade more than you can afford to lose.

@@ -1,6 +1,6 @@
-"""
+﻿"""
 core/orchestrator.py
-Master Orchestrator — collects signals from all agents,
+Master Orchestrator - collects signals from all agents,
 requires consensus before approving trades, routes to portfolio.
 """
 import asyncio
@@ -87,14 +87,14 @@ class MasterOrchestrator:
         self.market_scan_interval = int(os.getenv("MARKET_SCAN_INTERVAL", 60))
         self.news_scan_interval   = int(os.getenv("NEWS_POLL_INTERVAL", 60))
 
-        logger.info("Orchestrator initialised — all agents ready")
+        logger.info("Orchestrator initialised - all agents ready")
 
     # ------------------------------------------------------------------
     # Main Entry Point
     # ------------------------------------------------------------------
 
     def start(self):
-        """Start the bot — runs all agents in background threads."""
+        """Start the bot - runs all agents in background threads."""
         self.running = True
         logger.info("="*60)
         logger.info("  POLYMARKET PAPER TRADING BOT STARTING")
@@ -189,12 +189,12 @@ class MasterOrchestrator:
                         consensus: list) -> dict:
         """
         Opus 4.6 is the mandatory final decision maker.
-        Only APPROVE passes — REJECT or any error drops the trade.
+        Only APPROVE passes - REJECT or any error drops the trade.
         Falls back to APPROVE only if no API key is configured.
         """
         api_key = os.getenv("ANTHROPIC_API_KEY", "")
         if not api_key:
-            logger.warning("No ANTHROPIC_API_KEY — Opus gate bypassed, auto-approving")
+            logger.warning("No ANTHROPIC_API_KEY - Opus gate bypassed, auto-approving")
             return {"verdict": "APPROVE", "reasoning": "No API key configured."}
 
         agent_lines = "\n".join([
@@ -204,7 +204,7 @@ class MasterOrchestrator:
         ])
 
         prompt = f"""You are the automated risk gate for a Polymarket paper trading bot.
-Your decision is final and binary — no hedging allowed.
+Your decision is final and binary - no hedging allowed.
 
 PROPOSED TRADE
   Market    : {question}
@@ -223,7 +223,7 @@ APPROVE if: edge is credibly positive, agent reasoning is internally consistent,
 REJECT if:  edge looks fabricated or trivially small, reasoning contradicts itself,
             direction and logic don't match, or signal is obvious noise.
 
-Reply with ONLY valid JSON — no markdown, no explanation outside the JSON:
+Reply with ONLY valid JSON - no markdown, no explanation outside the JSON:
 {{"verdict": "APPROVE", "reasoning": "1-2 sentences max"}}
 
 Verdict must be exactly APPROVE or REJECT. UNCERTAIN is not a valid answer."""
@@ -238,16 +238,16 @@ Verdict must be exactly APPROVE or REJECT. UNCERTAIN is not a valid answer."""
             )
             text = msg.content[0].text.strip()
             result = json.loads(text)
-            # Enforce binary — anything other than APPROVE is a REJECT
+            # Enforce binary - anything other than APPROVE is a REJECT
             if result.get("verdict") not in ("APPROVE", "REJECT"):
                 result["verdict"] = "REJECT"
                 result["reasoning"] = f"Unexpected verdict normalised to REJECT: {text[:60]}"
             return result
         except json.JSONDecodeError as e:
-            logger.error(f"Opus gate returned non-JSON: {e} — rejecting to be safe")
+            logger.error(f"Opus gate returned non-JSON: {e} - rejecting to be safe")
             return {"verdict": "REJECT", "reasoning": f"Parse error: {e}"}
         except Exception as e:
-            logger.error(f"Opus gate API error: {e} — rejecting to be safe")
+            logger.error(f"Opus gate API error: {e} - rejecting to be safe")
             return {"verdict": "REJECT", "reasoning": f"API error: {e}"}
 
     def _run_bayes_agent(self):
@@ -306,10 +306,10 @@ Verdict must be exactly APPROVE or REJECT. UNCERTAIN is not a valid answer."""
                 logger.error(f"SignalProcessor error: {e}")
 
     def _process_signal(self, signal: dict):
-        """Process one signal — check consensus, validate, execute."""
+        """Process one signal - check consensus, validate, execute."""
         signal_type = signal.get("signal_type", "SKIP")
 
-        # Hard halt — stop all trading
+        # Hard halt - stop all trading
         if signal_type == "HALT":
             logger.warning(f"HALT signal received: {signal.get('reason')}")
             return
@@ -336,14 +336,14 @@ Verdict must be exactly APPROVE or REJECT. UNCERTAIN is not a valid answer."""
         if len(consensus) < self.min_consensus:
             logger.info(
                 f"Signal from {signal['agent']} for {condition_id[:20]} "
-                f"— waiting for consensus ({len(consensus)}/{self.min_consensus})"
+                f"- waiting for consensus ({len(consensus)}/{self.min_consensus})"
             )
             return
 
         logger.info(
             f"CONSENSUS REACHED: {len(consensus)} agents agree on "
             f"{condition_id[:20]} {signal.get('direction')} "
-            f"— proceeding to trade"
+            f"- proceeding to trade"
         )
 
         self._execute_trade(signal, consensus)
@@ -392,7 +392,7 @@ Verdict must be exactly APPROVE or REJECT. UNCERTAIN is not a valid answer."""
         )
 
         if proposed_size <= 0:
-            logger.info("Position sizer returned $0 — skipping trade")
+            logger.info("Position sizer returned $0 - skipping trade")
             return
 
         # Risk check
@@ -434,7 +434,7 @@ Verdict must be exactly APPROVE or REJECT. UNCERTAIN is not a valid answer."""
 
         if gate["verdict"] != "APPROVE":
             logger.info(
-                f"Opus 4.6 REJECTED: {gate.get('reasoning','')[:120]} — trade dropped"
+                f"Opus 4.6 REJECTED: {gate.get('reasoning','')[:120]} - trade dropped"
             )
             save_trade_journal(
                 condition_id=condition_id, question=question, direction=direction,

@@ -1,4 +1,4 @@
-"""
+﻿"""
 data/news_fetcher.py
 Fetches news headlines and scores them by relevance.
 Keyword scoring works without any API key.
@@ -40,7 +40,7 @@ RELEVANCE_KEYWORDS = {
 class NewsFetcher:
     """
     Fetches news and scores headlines for prediction market relevance.
-    No Claude API needed — keyword scoring works standalone.
+    No Claude API needed - keyword scoring works standalone.
     Optionally upgrades to AI analysis when API key is present.
     """
 
@@ -63,7 +63,7 @@ class NewsFetcher:
         Falls back to mock headlines if no API key.
         """
         if not self.news_api_key:
-            logger.warning("No NEWS_API_KEY — using mock headlines for testing")
+            logger.warning("No NEWS_API_KEY - using mock headlines for testing")
             return self._mock_headlines()
 
         try:
@@ -140,7 +140,7 @@ class NewsFetcher:
         }
 
     # ------------------------------------------------------------------
-    # AI Analysis (optional — only when Anthropic key is set)
+    # AI Analysis (optional - only when Anthropic key is set)
     # ------------------------------------------------------------------
 
     def analyse_with_ai(self, headline: str) -> dict:
@@ -152,11 +152,11 @@ class NewsFetcher:
         if not self.anthropic_key:
             return self.score_headline(headline)
 
-        # Rate limiting — max 10/minute
+        # Rate limiting - max 10/minute
         now = time.time()
         if now - self._last_ai_call < 60:
             if self._ai_calls_this_minute >= 10:
-                logger.debug("AI rate limit reached — using keyword scoring")
+                logger.debug("AI rate limit reached - using keyword scoring")
                 return self.score_headline(headline)
         else:
             self._ai_calls_this_minute = 0
@@ -189,7 +189,7 @@ Reply with ONLY a JSON object like:
                 "markets_affected": result.get("markets_affected", [])
             }
         except Exception as e:
-            logger.error(f"AI analysis failed: {e} — falling back to keyword scoring")
+            logger.error(f"AI analysis failed: {e} - falling back to keyword scoring")
             return self.score_headline(headline)
 
     # ------------------------------------------------------------------

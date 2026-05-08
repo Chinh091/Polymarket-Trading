@@ -1,4 +1,4 @@
-import type { JournalEntry } from "@/lib/types";
+﻿import type { JournalEntry } from "@/lib/types";
 
 interface Props {
   entries: JournalEntry[];
@@ -53,10 +53,10 @@ export function JournalTable({ entries }: Props) {
                 </td>
                 <td className="py-2 pr-4 tabular-nums text-zinc-300">{j.avg_edge?.toFixed(1)}%</td>
                 <td className="py-2 pr-4 tabular-nums text-zinc-300">
-                  {j.avg_confidence != null ? `${(j.avg_confidence * 100).toFixed(0)}%` : "—"}
+                  {j.avg_confidence != null ? `${(j.avg_confidence * 100).toFixed(0)}%` : "-"}
                 </td>
                 <td className="py-2 pr-4 text-zinc-500 max-w-[120px] truncate" title={j.agent_sources}>
-                  {j.agent_sources ?? "—"}
+                  {j.agent_sources ?? "-"}
                 </td>
                 <td className="py-2 text-zinc-400 max-w-[200px] truncate" title={j.question}>
                   {j.question?.slice(0, 55)}…

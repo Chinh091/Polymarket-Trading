@@ -1,8 +1,8 @@
-"""
+﻿"""
 tests/test_all.py
 Runs all components in isolation to verify they work.
 Run this FIRST before running run.py.
-No real API calls — uses mock data where needed.
+No real API calls - uses mock data where needed.
 """
 import sys
 import os
@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 print("="*60)
-print("  POLYMARKET BOT — COMPONENT TESTS")
+print("  POLYMARKET BOT - COMPONENT TESTS")
 print("="*60)
 
 errors = []
@@ -133,7 +133,7 @@ test("ArbitrageAgent: momentum calculation", test_arbitrage_agent)
 
 
 # ------------------------------------------------------------------
-# Test 5: News Fetcher (keyword scoring — no API needed)
+# Test 5: News Fetcher (keyword scoring - no API needed)
 # ------------------------------------------------------------------
 def test_news_fetcher():
     from data.news_fetcher import NewsFetcher

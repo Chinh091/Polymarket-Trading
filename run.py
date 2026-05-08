@@ -1,4 +1,4 @@
-"""
+﻿"""
 run.py
 Starts the Polymarket paper trading bot.
 Run: python run.py
@@ -29,7 +29,7 @@ def main():
     print("""
 ╔══════════════════════════════════════════════════════╗
 ║      POLYMARKET PAPER TRADING BOT                    ║
-║      Simulation mode — no real money                 ║
+║      Simulation mode - no real money                 ║
 ╚══════════════════════════════════════════════════════╝
 
 Starting all agents...

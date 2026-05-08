@@ -1,7 +1,7 @@
-"""
+﻿"""
 data/binance_fetcher.py
 Streams real-time BTC/ETH/SOL prices from Binance public WebSocket.
-No API key required — this is all public data.
+No API key required - this is all public data.
 """
 import asyncio
 import websockets
@@ -63,7 +63,7 @@ class BinanceFetcher:
 
         while True:
             try:
-                logger.info(f"Connecting to Binance WebSocket — tracking {SYMBOLS}")
+                logger.info(f"Connecting to Binance WebSocket - tracking {SYMBOLS}")
                 async with websockets.connect(url, ping_interval=20) as ws:
                     logger.info("Binance WebSocket connected")
                     async for message in ws:
@@ -82,10 +82,10 @@ class BinanceFetcher:
                         except (json.JSONDecodeError, ValueError):
                             pass
             except websockets.exceptions.ConnectionClosed:
-                logger.warning("Binance WebSocket closed — reconnecting in 5s")
+                logger.warning("Binance WebSocket closed - reconnecting in 5s")
                 await asyncio.sleep(5)
             except Exception as e:
-                logger.error(f"Binance WebSocket error: {e} — retrying in 10s")
+                logger.error(f"Binance WebSocket error: {e} - retrying in 10s")
                 await asyncio.sleep(10)
 
     def get_latest_price(self, symbol: str) -> float:

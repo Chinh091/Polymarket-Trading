@@ -1,6 +1,6 @@
-"""
+﻿"""
 dashboard/app.py
-Streamlit dashboard — run with: streamlit run dashboard/app.py
+Streamlit dashboard - run with: streamlit run dashboard/app.py
 Shows live portfolio performance, signals, and trade history.
 """
 import streamlit as st
@@ -27,7 +27,7 @@ st.set_page_config(
 )
 
 st.title("📈 Polymarket Paper Trading Bot")
-st.caption("Simulation only — no real money. Refresh every 30s for live data.")
+st.caption("Simulation only - no real money. Refresh every 30s for live data.")
 
 # Auto-refresh every 30 seconds
 st.markdown("""
@@ -109,7 +109,7 @@ with col_left:
         )
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("No portfolio data yet — bot hasn't made any trades.")
+        st.info("No portfolio data yet - bot hasn't made any trades.")
 
 with col_right:
     st.subheader("Agent Attribution")
@@ -167,7 +167,7 @@ if signals:
     cols_sig = [c for c in cols_sig if c in df_sig.columns]
     st.dataframe(df_sig[cols_sig], use_container_width=True, height=250)
 else:
-    st.info("No signals yet — agents are starting up.")
+    st.info("No signals yet - agents are starting up.")
 
 # ------------------------------------------------------------------
 # Trade History
@@ -202,4 +202,4 @@ with st.expander("📋 Active Markets in Database"):
     else:
         st.info("No markets fetched yet.")
 
-st.caption(f"Last updated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC | Paper trading only — not financial advice")
+st.caption(f"Last updated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC | Paper trading only - not financial advice")

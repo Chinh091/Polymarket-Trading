@@ -1,4 +1,4 @@
-"""
+﻿"""
 core/database.py
 Handles all SQLite storage for markets, prices, trades, and signals.
 """
@@ -25,7 +25,7 @@ def init_database():
     conn = get_connection()
     c = conn.cursor()
 
-    # Markets table — stores active Polymarket markets
+    # Markets table - stores active Polymarket markets
     c.execute("""
         CREATE TABLE IF NOT EXISTS markets (
             condition_id    TEXT PRIMARY KEY,
@@ -42,7 +42,7 @@ def init_database():
         )
     """)
 
-    # Price snapshots — real-time orderbook data
+    # Price snapshots - real-time orderbook data
     c.execute("""
         CREATE TABLE IF NOT EXISTS price_snapshots (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,7 +56,7 @@ def init_database():
         )
     """)
 
-    # Spot prices — Binance BTC/ETH/SOL
+    # Spot prices - Binance BTC/ETH/SOL
     c.execute("""
         CREATE TABLE IF NOT EXISTS spot_prices (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,7 +67,7 @@ def init_database():
         )
     """)
 
-    # Agent signals — every signal from every agent
+    # Agent signals - every signal from every agent
     c.execute("""
         CREATE TABLE IF NOT EXISTS agent_signals (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -82,7 +82,7 @@ def init_database():
         )
     """)
 
-    # Paper trades — every simulated trade
+    # Paper trades - every simulated trade
     c.execute("""
         CREATE TABLE IF NOT EXISTS paper_trades (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -107,7 +107,7 @@ def init_database():
         )
     """)
 
-    # Portfolio snapshots — bankroll over time
+    # Portfolio snapshots - bankroll over time
     c.execute("""
         CREATE TABLE IF NOT EXISTS portfolio_snapshots (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -120,7 +120,7 @@ def init_database():
         )
     """)
 
-    # News log — headlines + keyword scores (no API needed)
+    # News log - headlines + keyword scores (no API needed)
     c.execute("""
         CREATE TABLE IF NOT EXISTS news_log (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -135,7 +135,7 @@ def init_database():
         )
     """)
 
-    # Trade journal — full context for every decision (approved AND rejected)
+    # Trade journal - full context for every decision (approved AND rejected)
     # This is the primary source for end-of-day reports and future improvement
     c.execute("""
         CREATE TABLE IF NOT EXISTS trade_journal (

@@ -1,4 +1,4 @@
-"""
+﻿"""
 data/polymarket_fetcher.py
 Fetches markets and orderbook data from Polymarket's public APIs.
 No authentication required for read-only access.
@@ -33,7 +33,7 @@ class PolymarketFetcher:
         self.session.headers.update({"User-Agent": "PolymarketBot/1.0"})
 
     # ------------------------------------------------------------------
-    # GAMMA API — Market Discovery
+    # GAMMA API - Market Discovery
     # ------------------------------------------------------------------
 
     def fetch_active_markets(self, limit: int = 100) -> list:
@@ -89,7 +89,7 @@ class PolymarketFetcher:
             return {}
 
     # ------------------------------------------------------------------
-    # CLOB API — Orderbook Data
+    # CLOB API - Orderbook Data
     # ------------------------------------------------------------------
 
     def fetch_orderbook(self, token_id: str) -> dict:
@@ -162,7 +162,7 @@ class PolymarketFetcher:
         logger.info(f"Updated prices for {updated} markets")
 
     # ------------------------------------------------------------------
-    # CLOB WebSocket — Real-time Stream
+    # CLOB WebSocket - Real-time Stream
     # ------------------------------------------------------------------
 
     async def stream_prices(self, token_ids: list, callback):
@@ -185,7 +185,7 @@ class PolymarketFetcher:
                 logger.info(f"Connecting to CLOB WebSocket for {len(token_ids)} tokens")
                 async with websockets.connect(CLOB_WS, ping_interval=30) as ws:
                     await ws.send(json.dumps(subscribe_msg))
-                    logger.info("WebSocket connected — streaming live prices")
+                    logger.info("WebSocket connected - streaming live prices")
                     async for message in ws:
                         try:
                             data = json.loads(message)
@@ -197,10 +197,10 @@ class PolymarketFetcher:
                         except json.JSONDecodeError:
                             pass
             except websockets.exceptions.ConnectionClosed:
-                logger.warning("WebSocket disconnected — reconnecting in 5s")
+                logger.warning("WebSocket disconnected - reconnecting in 5s")
                 await asyncio.sleep(5)
             except Exception as e:
-                logger.error(f"WebSocket error: {e} — reconnecting in 10s")
+                logger.error(f"WebSocket error: {e} - reconnecting in 10s")
                 await asyncio.sleep(10)
 
     def get_implied_probability(self, token_id: str) -> float:
